@@ -1,10 +1,15 @@
 # mm-vae
 Multimodal VAE development
 
+test
 train_first_iter.py---------main code to run
+
 vanillaVAE.py---------------pytorch examples VAE that continual_VAE_first_iter inherits from
+
 continual_VAE_first_iter.py-has different VAE models that can be importated to train_first_iter and inherits from vanillaVAE
+
 traverse_latent.py----------contains functions helpfull for traversing the latent space, used in train_first_iter
+
 get_dataset_first_iter.py---contains functions helpful for splitting the mnist dataset into different tasks
 
 
