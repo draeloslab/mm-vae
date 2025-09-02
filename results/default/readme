@@ -1,0 +1,8 @@
+each split corresponds to
+0. Default, no split
+#   1. A = 0-4, B = 5-9
+#   2. A=even, B=odd
+#   3. A = 0-4, B = 0-5
+#   4. A = 0-1, B = 2-3, C = 4-5...
+
+each result was evaluated on each previous split
