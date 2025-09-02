@@ -1,0 +1,13 @@
+# This is the config file for the mm-vae 
+model: 
+  type: VanillaVAE
+data: 
+  random_seed: 1
+training_params: 
+  epochs: 10
+  batch_size: 128
+  log_interval: 10 # number of batches to wait until logging the training status 
+output: 
+  output_folder: results 
+runtime_config: 
+  accelerator: True # True means try to use GPU
