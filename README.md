@@ -1,7 +1,7 @@
 # mm-vae
 Multimodal VAE development
 
-test
+test push branch
 train_first_iter.py---------main code to run
 
 vanillaVAE.py---------------pytorch examples VAE that continual_VAE_first_iter inherits from
