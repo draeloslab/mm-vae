@@ -36,3 +36,6 @@ Look at another dataset (dsprites) (shapes). Make sure that works for any type o
 Latent space linear and stepwise density
 Accuracy to judge 
 Complicated rna-seq data
+
+
+gifs_from_images.py just makes gifs from certain images, a lot of hardcoded stuff so probably wont be too usefull later on

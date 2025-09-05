@@ -49,45 +49,57 @@ class default_VAE(VAE):
         z = self.reparameterize(mu, logvar)
         return self.decode(z), mu, logvar
     
-    def loss_function(self, recon_x, x, mu, logvar):
+    def loss_function(self, recon_x, x, mu, logvar, split = False):
         BCE = F.binary_cross_entropy(recon_x, x.view(-1, 784), reduction='sum') #reconstruction loss (difference between input and reconstruciton)
         # see Appendix B from VAE paper:
         # Kingma and Welling. Auto-Encoding Variational Bayes. ICLR, 2014
         # https://arxiv.org/abs/1312.6114
         # 0.5 * sum(1 + log(sigma^2) - mu^2 - sigma^2)
         KLD = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp()) #KLD difference from approximating posterior
-
-        return BCE + KLD
+        if split:
+            return BCE, KLD
+    
+        return BCE+KLD
 
     def train_epoch(self, epoch, train_loader, device, optimizer, log_interval):
         self.train()
-        train_loss = 0
+        recon_loss = 0
+        dkl_loss = 0
         for batch_idx, (data, _) in enumerate(train_loader):
             data = data.to(device)
             optimizer.zero_grad()
             recon_batch, mu, logvar = self(data) #pytorch runs forward automatically
-            loss = self.loss_function(recon_batch, data, mu, logvar)
+            recon_loss_tmp,  dkl_loss_tmp= self.loss_function(recon_batch, data, mu, logvar, split = True)
+            loss = recon_loss_tmp + dkl_loss_tmp
             loss.backward()
-            train_loss += loss.item()
+            recon_loss += recon_loss_tmp.item()
+            dkl_loss+= dkl_loss_tmp.item()
             optimizer.step()
+            
+            
             if batch_idx % log_interval == 0:
-                print('Train Epoch: {} [{}/{} ({:.0f}%)]\tLoss: {:.6f}'.format(
+                print('Train Epoch: {} [{}/{} ({:.0f}%)]\t recon Loss: {:.6f} \t DKL Loss: {:.6f}'.format(
                     epoch, batch_idx * len(data), len(train_loader.dataset),
                     100. * batch_idx / len(train_loader),
-                    loss.item() / len(data)))
+                    recon_loss_tmp.item() / len(data), dkl_loss_tmp.item() / len(data)))
 
-        print('====> Epoch: {} Average loss: {:.4f}'.format(
-            epoch, train_loss / len(train_loader.dataset)))
+        avg_recon = recon_loss / len(train_loader.dataset)
+        avg_dkl = dkl_loss / len(train_loader.dataset)
+        print('====> Epoch: {} Avg recon loss: {:.4f} \t Avg DKL loss {:.4f}'.format(epoch, avg_recon, avg_dkl))
+        return avg_recon, avg_dkl
 
 
     def test_epoch(self, epoch, test_loader, device, batch_size, model_name, split_name, task_name, evaluated_name):
         self.eval()
-        test_loss = 0
+        recon_loss = 0
+        dkl_loss = 0
         with torch.no_grad():
             for i, (data, _) in enumerate(test_loader):
                 data = data.to(device)
                 recon_batch, mu, logvar = self(data)
-                test_loss += self.loss_function(recon_batch, data, mu, logvar).item()
+                recon_loss_tmp, dkl_loss_tmp = self.loss_function(recon_batch, data, mu, logvar, split = True)
+                recon_loss += recon_loss_tmp.item()
+                dkl_loss+= dkl_loss_tmp.item()
                 if i == 0:
                     n = min(data.size(0), 8)
                     comparison = torch.cat([data[:n],
@@ -96,5 +108,8 @@ class default_VAE(VAE):
                             
                         'results/' + model_name + '/split'+ split_name +'/recreation_' + 'task_' + task_name + '_evaluatedOn_' + evaluated_name + '_epoch_' +str(epoch) + '.png', nrow=n)
 
-        test_loss /= len(test_loader.dataset)
-        print('====> Test set loss: {:.4f}'.format(test_loss))
+        recon_loss /= len(test_loader.dataset)
+        dkl_loss /= len(test_loader.dataset)
+        print('====> Test set recon loss: {:.4f}; Test set DKL loss {:.4f}'.format(recon_loss, dkl_loss))
+
+        return recon_loss, dkl_loss

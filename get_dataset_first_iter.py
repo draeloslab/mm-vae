@@ -6,6 +6,8 @@ from torch import nn, optim
 from torch.nn import functional as F
 from torchvision import datasets, transforms
 from torchvision.utils import save_image
+import numpy as np
+
 
 
 #My goal is to create a VAE that inherits from the original VAE that implements slowed learning rates from https://arxiv.org/pdf/1612.00796
@@ -29,6 +31,9 @@ from torchvision.utils import save_image
 
 #     return tr_loader_list, te_loader_list
 
+
+
+
 def _get_targets(ds): #gpt function to help get the labels
     # MNIST uses `targets`; older torchvision used `train_labels` / `test_labels`
     for name in ("targets", "train_labels", "test_labels"):
@@ -48,6 +53,8 @@ def _indices_for_labels(ds, labels): #gpt function to get indices of targets. Pr
         for l in labels:
             mask |= (targets == int(l))
     return mask.nonzero(as_tuple=False).squeeze().tolist()
+
+
 
 def get_train_test_loaders(batch_size, split, root="../data", download=True, **kwargs):
     #need the dataset first not the dataloader to create subset then dataloader

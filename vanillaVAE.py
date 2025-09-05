@@ -19,6 +19,7 @@ parser.add_argument('--seed', type=int, default=1, metavar='S',
                         help='random seed (default: 1)')
 parser.add_argument('--log-interval', type=int, default=10, metavar='N',
                         help='how many batches to wait before logging training status')
+#added split and model because otherwise it wouldnt work later
 parser.add_argument('--split', type=int, default=0, metavar='N',
                         help='what task splitting to use 0 = no split, 1 = 0-4, 5-9, 2 = even/odd, 3 = 0-4, 0-5, 4 = every 2 (5 total)')
 parser.add_argument('--model', type=int, default=0, metavar='N',

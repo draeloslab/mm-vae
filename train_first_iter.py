@@ -7,6 +7,7 @@ from torch.nn import functional as F
 from torchvision import datasets, transforms
 from torchvision.utils import save_image
 from get_dataset_first_iter import get_train_test_loaders
+from traverse_latent import umap_vis, create_umap_data
 from continual_VAE_first_iter import default_VAE#, weighted_VAE, generative_VAE
 
 import os, sys
@@ -71,6 +72,7 @@ def other_setup(args):
     kwargs = {'num_workers': 1, 'pin_memory': True} if use_accel else {}
     return device, kwargs
 
+
 def main(args, device, kwargs):
     possible_split_dict = {
         0: [(0,1,2,3,4,5,6,7,8,9)],
@@ -100,11 +102,18 @@ def main(args, device, kwargs):
     optimizer = optim.Adam(model.parameters(), lr=1e-3)
 
     for task in range(len(train_loader_list)):
+        umap_X_train, umap_y_train, umap_X_test, umap_y_test = create_umap_data(list(set(x for tup in possible_split_dict[args.split][:task+1] for x in tup)))
+        
+        #^ just makes a list of all the numbers seen so far to create the umap
         print("training task: ", task)
         for epoch in range(1, args.epochs + 1):
-            model.train_epoch(epoch, train_loader_list[task], device, optimizer, args.log_interval)
+
+            avg_recon, avg_dkl = model.train_epoch(epoch, train_loader_list[task], device, optimizer, args.log_interval)
+            umap_path = 'results/' + str(model_dict[args.model]) + '/split'+ str(args.split) +'/UMAPs/UMAP_' + 'task_' + str(task) + '_epoch_' +str(epoch)
+            umap_vis(model, epoch, task, umap_X_train, umap_y_train, umap_X_test, umap_y_test, device, umap_path)
+            
             for previous_task in range(task+1):
-                model.test_epoch(epoch, test_loader_list[previous_task], device, args.batch_size, model_dict[args.model], str(args.split), str(task), str(previous_task))
+                test_recon, test_dkl = model.test_epoch(epoch, test_loader_list[previous_task], device, args.batch_size, model_dict[args.model], str(args.split), str(task), str(previous_task))
             with torch.no_grad():
                 sample = torch.randn(64, 20).to(device) #random numbers into the decoder to generate a random digit
                 sample = model.decode(sample).cpu() #generate  the new images
