@@ -7,7 +7,7 @@ from torch.nn import functional as F
 from torchvision import datasets, transforms
 from torchvision.utils import save_image
 from get_dataset_first_iter import get_train_test_loaders
-from traverse_latent import umap_vis, create_umap_data
+from traverse_latent import umap_vis, create_umap_data, project_umap
 from continual_VAE_first_iter import default_VAE#, weighted_VAE, generative_VAE
 
 import os, sys
@@ -36,6 +36,8 @@ def get_args():
                         help='what task splitting to use 0 = no split, 1 = 0-4, 5-9, 2 = even/odd, 3 = 0-4, 0-5, 4 = every 2 (5 total)')
     parser.add_argument('--model', type=int, default=0, metavar='N',
                         help='what model to use, 0 = default, 1 = weighted, 2 = generative')
+    parser.add_argument('--visualize', action='store_true', default=False,
+                        help='wheter to visualize with umaps')
     args = parser.parse_args()
     return args
 
@@ -101,8 +103,11 @@ def main(args, device, kwargs):
     
     optimizer = optim.Adam(model.parameters(), lr=1e-3)
 
+    projection_info = {}
+    projection_labels = {}
     for task in range(len(train_loader_list)):
-        umap_X_train, umap_y_train, umap_X_test, umap_y_test = create_umap_data(list(set(x for tup in possible_split_dict[args.split][:task+1] for x in tup)))
+        if args.visualize:
+            umap_X_train, umap_y_train, umap_X_test, umap_y_test = create_umap_data(list(set(x for tup in possible_split_dict[args.split][:task+1] for x in tup)))
         
         #^ just makes a list of all the numbers seen so far to create the umap
         print("training task: ", task)
@@ -110,16 +115,30 @@ def main(args, device, kwargs):
 
             avg_recon, avg_dkl = model.train_epoch(epoch, train_loader_list[task], device, optimizer, args.log_interval)
             umap_path = 'results/' + str(model_dict[args.model]) + '/split'+ str(args.split) +'/UMAPs/UMAP_' + 'task_' + str(task) + '_epoch_' +str(epoch)
-            umap_vis(model, epoch, task, umap_X_train, umap_y_train, umap_X_test, umap_y_test, device, umap_path)
-            
+            if args.visualize:
+                #instead of avg loss over the epoch, you can get the final loss by returning recon_loss_tmp
+                test_recon, test_dkl = model.test_epoch(epoch, test_loader_list[task], device, args.batch_size, model_dict[args.model], str(args.split), str(task), str(task), vis = False)
+                mu_train, mu_test, labels_np_train, labels_np_test = umap_vis(model, epoch, task, umap_X_train, umap_y_train, umap_X_test, umap_y_test, device, umap_path, avg_recon, avg_dkl, test_recon, test_dkl)
+                projection_info[str(task)+"_" + str(epoch)+"train"] = mu_train
+                projection_info[str(task)+"_" + str(epoch)+"test"] = mu_test
+                projection_labels[str(task)+"_" + str(epoch)+"train"] = labels_np_train
+                projection_labels[str(task)+"_" + str(epoch)+"test"] = labels_np_test
             for previous_task in range(task+1):
-                test_recon, test_dkl = model.test_epoch(epoch, test_loader_list[previous_task], device, args.batch_size, model_dict[args.model], str(args.split), str(task), str(previous_task))
+                test_recon, test_dkl = model.test_epoch(epoch, test_loader_list[previous_task], device, args.batch_size, model_dict[args.model], str(args.split), str(task), str(previous_task), vis = args.visualize)
             with torch.no_grad():
                 sample = torch.randn(64, 20).to(device) #random numbers into the decoder to generate a random digit
                 sample = model.decode(sample).cpu() #generate  the new images
                 save_image(sample.view(64, 1, 28, 28),
                         'results/' + model_dict[args.model] + '/split'+ str(args.split) +'/sample_' + 'task_' + str(task) + '_epoch_' +str(epoch) + '.png')
+    if args.visualize:
+        print("LEN PROJECCTION INFO AND PROJECTION LABELS")
+        print(len(projection_info))
+        print(len(projection_labels))
+        project_umap(projection_info, projection_labels, len(train_loader_list), args.epochs, str(model_dict[args.model]), str(args.split))
         
+
+
+
 if __name__ == "__main__":
     args = get_args()
     print(args)

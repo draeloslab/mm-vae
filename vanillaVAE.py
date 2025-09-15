@@ -24,6 +24,8 @@ parser.add_argument('--split', type=int, default=0, metavar='N',
                         help='what task splitting to use 0 = no split, 1 = 0-4, 5-9, 2 = even/odd, 3 = 0-4, 0-5, 4 = every 2 (5 total)')
 parser.add_argument('--model', type=int, default=0, metavar='N',
                         help='what model to use, 0 = default, 1 = weighted, 2 = generative')
+parser.add_argument('--visualize', action='store_true', default=False, 
+                        help='wheter to visualize with umaps')
 args = parser.parse_args()
 
 #To get it to work on my device (just what gpt said worked)

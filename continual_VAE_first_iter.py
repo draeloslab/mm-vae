@@ -89,7 +89,7 @@ class default_VAE(VAE):
         return avg_recon, avg_dkl
 
 
-    def test_epoch(self, epoch, test_loader, device, batch_size, model_name, split_name, task_name, evaluated_name):
+    def test_epoch(self, epoch, test_loader, device, batch_size, model_name, split_name, task_name, evaluated_name, vis):
         self.eval()
         recon_loss = 0
         dkl_loss = 0
@@ -101,12 +101,14 @@ class default_VAE(VAE):
                 recon_loss += recon_loss_tmp.item()
                 dkl_loss+= dkl_loss_tmp.item()
                 if i == 0:
-                    n = min(data.size(0), 8)
-                    comparison = torch.cat([data[:n],
-                                        recon_batch.view(batch_size, 1, 28, 28)[:n]])
-                    save_image(comparison.cpu(),
-                            
-                        'results/' + model_name + '/split'+ split_name +'/recreation_' + 'task_' + task_name + '_evaluatedOn_' + evaluated_name + '_epoch_' +str(epoch) + '.png', nrow=n)
+                    if vis:
+                        n = min(data.size(0), 8)
+                        comparison = torch.cat([data[:n],
+                                            recon_batch.view(batch_size, 1, 28, 28)[:n]])
+                        
+                        save_image(comparison.cpu(),
+                                
+                            'results/' + model_name + '/split'+ split_name +'/recreation_' + 'task_' + task_name + '_evaluatedOn_' + evaluated_name + '_epoch_' +str(epoch) + '.png', nrow=n)
 
         recon_loss /= len(test_loader.dataset)
         dkl_loss /= len(test_loader.dataset)

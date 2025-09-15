@@ -29,7 +29,7 @@ def traverse_latent_stepwise_density():
 
 #this function just returns a numpy array usable with the umap function
 #the numpy array is composed of the data from the current task and all previous tasks the model has trained on
-#right now this uses train data, but maybe it should be used on test data or a combination
+#gives train and test data separately
 def create_umap_data(labels):
     print("labels: ", labels)
     #can only access dataset 1 at a time, easier to make a large dataloader. mayber theres a better way
@@ -60,7 +60,7 @@ def create_umap_data(labels):
 
     return X_train, y_train, X_test, y_test
 
-def plot_umap(path, task_num, epoch, embedding, labels_np, data_type):
+def plot_umap(path, task_num, epoch, embedding, labels_np, data_type, avg_recon, avg_dkl, projected):
 
     plt.figure(figsize=(6,5), dpi=140)
     # use 10 distinct colors rather than a continuous colormap
@@ -79,10 +79,24 @@ def plot_umap(path, task_num, epoch, embedding, labels_np, data_type):
     cbar = plt.colorbar(sc, boundaries=bounds, ticks=np.arange(10))
     cbar.set_label('Digit')
 
-    plt.title(data_type + " data UMAP of Latent space for task: " + str(task_num) + " epoch: " + str(epoch))
-    plt.tight_layout()
-    plt.savefig(path + "_" + data_type + "_data.png")
-    plt.close()
+    if not projected:
+        textstr = f"avg recon loss: {avg_recon:.4f}\navg dkl loss: {avg_dkl:.4f}"
+        ax.text(
+            0.98, 0.02, textstr,
+            transform=ax.transAxes, ha='right', va='bottom',
+            fontsize=9,
+            bbox=dict(facecolor='white', alpha=0.75, edgecolor='none', boxstyle='round,pad=0.3')
+        )
+
+        plt.title(data_type + " data UMAP of Latent space for task: " + str(task_num) + " epoch: " + str(epoch))
+        plt.tight_layout()
+        plt.savefig(path + "_" + data_type + "_data.png")
+        plt.close()
+    else: 
+        plt.title("Projected " + data_type + " data UMAP of Latent space for task: " + str(task_num)+ " epoch: " + str(epoch))
+        plt.tight_layout()
+        plt.savefig(path + "_" + data_type +  "_epoch_" + str(epoch)+"_data_projected.png")
+        plt.close()
 
 def get_embedding(X, y, device, model):
     X = X.to(device).view(X.size(0), -1) #flatten to N, 784 for input
@@ -92,22 +106,50 @@ def get_embedding(X, y, device, model):
     labels_np = y.detach().cpu().numpy()
 
     reducer = umap.UMAP(random_state=1) #probably gonna want to ask about hyperparams
-    embedding = reducer.fit_transform(feats_np)
+    reducer = reducer.fit(feats_np)
+    embedding = reducer.transform(feats_np)
     print(embedding.shape)
-    return embedding, labels_np
+    return embedding, labels_np, feats_np
     
 
-def umap_vis(model, epoch, task_num, X_train, y_train, X_test, y_test, device, path):  #https://umap-learn.readthedocs.io/en/latest/basic_usage.html
+def umap_vis(model, epoch, task_num, X_train, y_train, X_test, y_test, device, path, avg_recon, avg_dkl, test_recon, test_dkl, projected = False):  #https://umap-learn.readthedocs.io/en/latest/basic_usage.html
                 #theres a thing where you can see the numbers on the umap, but not worht the time because rna-seq
     model.eval() #you need with no_grad, some things act differently unless in eval mode
     with torch.no_grad():
         #run the umap data through the encoder
         
-        embedding, labels_np= get_embedding(X_train, y_train, device, model)
-        plot_umap(path, task_num, epoch, embedding, labels_np, "Train")
+        embedding, labels_np_train, mu_train= get_embedding(X_train, y_train, device, model)
+        plot_umap(path, task_num, epoch, embedding, labels_np_train, "Train", avg_recon, avg_dkl, projected)
 
 
         #TEST DATA
         #run the umap data through the encoder
-        embedding, labels_np = get_embedding(X_test, y_test, device, model)
-        plot_umap(path, task_num, epoch, embedding, labels_np, "Test")
+        embedding, labels_np_test, mu_test= get_embedding(X_test, y_test, device, model)
+        plot_umap(path, task_num, epoch, embedding, labels_np_test, "Test", test_recon, test_dkl, projected)
+
+    return mu_train, mu_test, labels_np_train, labels_np_test
+
+def project_umap_helper(projection_info, projection_labels, tasks, epochs, model_num, split_num, trte):
+    reducer = umap.UMAP(random_state=1)
+    final_key = str(tasks-1)+ "_" + str(epochs)+trte
+    print("FINAL KEY: ", final_key)
+    reducer = reducer.fit(projection_info[str(tasks-1)+ "_" + str(epochs)+"train"])
+
+    for task in range(tasks):
+        for epoch in range(1, epochs + 1):
+            #basically train the last umap using the final data encoded on the final model
+            #then run with the same umap, the previous data from each epoch (using the previous model)
+            umap_path = 'results/' + model_num + '/split'+ split_num +'/UMAPs/projected/UMAP_' + 'task_' + str(task)
+            embedding = reducer.transform(projection_info[str(task)+"_" + str(epoch)+trte])
+
+            labels = projection_labels[str(task)+"_" + str(epoch)+trte]
+
+            print("FEW PRINTS TO TEST PROJECTION: embedding/labels")
+            print(len(embedding))
+            print(len(labels))
+            plot_umap(umap_path, task, epoch, embedding, labels, trte, -1, -1, True)
+
+def project_umap(projection_info, projection_labels, tasks, epochs, model_num, split_num):
+        #should make a funciton to split this into train and test
+        project_umap_helper(projection_info, projection_labels, tasks, epochs, model_num, split_num, "train")
+        project_umap_helper(projection_info, projection_labels, tasks, epochs, model_num, split_num, "test")
