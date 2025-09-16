@@ -27,3 +27,28 @@ for i in range(splits):
 
 
 
+# PROJECTED
+
+# epochs = 5
+# max_tasks = 10
+# splits = 5 #start from 0
+# for i in range(splits):
+#     for data in ("test", "train"):
+#         frames = []
+#         for task in range(max_tasks):
+#                 for epoch in range(1, epochs+1):
+#                     file_path = rf"results/default/split{i}/UMAPs/projected/UMAP_task_{task}_{data}_epoch_{epoch}_data_projected.png"
+#                     if os.path.exists(file_path):
+#                         frames.append(file_path)
+
+#         print(len(frames))
+#         iio.mimsave(
+#             f"results/default/gif_for_splits/projected/{data}_data_split_{i}_projected.gif",
+#             [iio.imread(f) for f in frames],
+#             duration=[1000]*len(frames),
+#             loop=0
+#         )
+
+
+
+
