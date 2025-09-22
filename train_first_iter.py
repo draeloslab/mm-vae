@@ -7,8 +7,9 @@ from torch.nn import functional as F
 from torchvision import datasets, transforms
 from torchvision.utils import save_image
 from get_dataset_first_iter import get_train_test_loaders
-from traverse_latent import umap_vis, create_umap_data, project_umap
+from traverse_latent import umap_vis, create_umap_data, project_umap, quant_clusters
 from continual_VAE_first_iter import default_VAE#, weighted_VAE, generative_VAE
+from quant_format_helper import write_cluster_quant_txt
 
 import os, sys
 print("[DEBUG] running:", __file__)
@@ -37,7 +38,11 @@ def get_args():
     parser.add_argument('--model', type=int, default=0, metavar='N',
                         help='what model to use, 0 = default, 1 = weighted, 2 = generative')
     parser.add_argument('--visualize', action='store_true', default=False,
-                        help='wheter to visualize with umaps')
+                        help='wheter to visualize with umaps') 
+    parser.add_argument('--quantify', action='store_true', default=False,
+                        help='wheter to quantify with inter intra dists')
+    parser.add_argument('--projection', action='store_true', default=False,
+                        help='wheter to quantify with inter intra dists')
     args = parser.parse_args()
     return args
 
@@ -106,8 +111,8 @@ def main(args, device, kwargs):
     projection_info = {}
     projection_labels = {}
     for task in range(len(train_loader_list)):
-        if args.visualize:
-            umap_X_train, umap_y_train, umap_X_test, umap_y_test = create_umap_data(list(set(x for tup in possible_split_dict[args.split][:task+1] for x in tup)))
+        if args.visualize or args.quantify:
+            umap_tr_loader, umap_te_loader = create_umap_data(list(set(x for tup in possible_split_dict[args.split][:task+1] for x in tup)), args.batch_size)
         
         #^ just makes a list of all the numbers seen so far to create the umap
         print("training task: ", task)
@@ -118,11 +123,12 @@ def main(args, device, kwargs):
             if args.visualize:
                 #instead of avg loss over the epoch, you can get the final loss by returning recon_loss_tmp
                 test_recon, test_dkl = model.test_epoch(epoch, test_loader_list[task], device, args.batch_size, model_dict[args.model], str(args.split), str(task), str(task), vis = False)
-                mu_train, mu_test, labels_np_train, labels_np_test = umap_vis(model, epoch, task, umap_X_train, umap_y_train, umap_X_test, umap_y_test, device, umap_path, avg_recon, avg_dkl, test_recon, test_dkl)
+                mu_train, mu_test, labels_np_train, labels_np_test = umap_vis(model, epoch, task, umap_tr_loader, umap_te_loader, device, umap_path, avg_recon, avg_dkl, test_recon, test_dkl)
                 projection_info[str(task)+"_" + str(epoch)+"train"] = mu_train
                 projection_info[str(task)+"_" + str(epoch)+"test"] = mu_test
                 projection_labels[str(task)+"_" + str(epoch)+"train"] = labels_np_train
                 projection_labels[str(task)+"_" + str(epoch)+"test"] = labels_np_test
+
             for previous_task in range(task+1):
                 test_recon, test_dkl = model.test_epoch(epoch, test_loader_list[previous_task], device, args.batch_size, model_dict[args.model], str(args.split), str(task), str(previous_task), vis = args.visualize)
             with torch.no_grad():
@@ -130,11 +136,26 @@ def main(args, device, kwargs):
                 sample = model.decode(sample).cpu() #generate  the new images
                 save_image(sample.view(64, 1, 28, 28),
                         'results/' + model_dict[args.model] + '/split'+ str(args.split) +'/sample_' + 'task_' + str(task) + '_epoch_' +str(epoch) + '.png')
-    if args.visualize:
+        with torch.no_grad():
+            if args.quantify:
+                #quantify cluster for each task
+                inter_dists_tr, intra_dists_tr, inter_dists_te, intra_dists_te = quant_clusters(model, umap_tr_loader, umap_te_loader, task, device)
+                #just use all the info from the last epoch on the task from above
+                print("CLUSTER QUANT INFO")
+                print(inter_dists_tr)
+                print(intra_dists_tr)
+                print(inter_dists_te)
+                print(intra_dists_te)
+                print("END CLUSTER INFO")
+
+                write_cluster_quant_txt(inter_dists_tr, intra_dists_tr, inter_dists_te, intra_dists_te, task, args.split)
+    if args.projection:
         print("LEN PROJECCTION INFO AND PROJECTION LABELS")
         print(len(projection_info))
         print(len(projection_labels))
         project_umap(projection_info, projection_labels, len(train_loader_list), args.epochs, str(model_dict[args.model]), str(args.split))
+
+    
         
 
 
