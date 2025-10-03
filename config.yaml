@@ -1,0 +1,21 @@
+# This is the config file for the mm-vae 
+model: 
+  type: CGMVAE
+data: 
+  random_seed: 30
+  dataset: DIET
+  data_path: '/Users/racheliritani/Desktop/AD Project/VAE-work/c-gmvae/data_nature_filtered.csv'
+training_params: 
+  epochs: 2000
+  batch_size: 128
+  log_interval: 10 # number of batches to wait until logging the training status 
+  gmm_centers: '/Users/racheliritani/Desktop/AD Project/VAE-work/c-gmvae/results_DIET/gmm_centers_5_zigzag.csv'
+  gmm_std: 0.1
+  learning_rate: 0.001
+loss_params: 
+  data_loss_weight: 1
+  kl_weight: 5
+output: 
+  output_folder: results_DIET/CGMVAE
+runtime_config: 
+  accelerator: True # True means try to use GPU
