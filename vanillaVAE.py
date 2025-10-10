@@ -105,7 +105,7 @@ optimizer = optim.Adam(model.parameters(), lr=1e-3)
 
 
 # Reconstruction + KL divergence losses summed over all elements and batch
-def loss_function(recon_x, x, mu, logvar):
+def loss_function(recon_x, x, mu, logvar, test = False):
     BCE = F.binary_cross_entropy(recon_x, x.view(-1, 784), reduction='sum') #reconstruction loss (difference between input and reconstruciton)
 
     # see Appendix B from VAE paper:
@@ -113,18 +113,24 @@ def loss_function(recon_x, x, mu, logvar):
     # https://arxiv.org/abs/1312.6114
     # 0.5 * sum(1 + log(sigma^2) - mu^2 - sigma^2)
     KLD = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp()) #KLD difference from approximating posterior
-
-    return BCE + KLD
+    if test:
+        return BCE + KLD
+    return BCE, KLD
 
 
 def train(epoch):
     model.train()
     train_loss = 0
+    BCE_tot = 0
+    KLD_tot = 0
     for batch_idx, (data, _) in enumerate(train_loader):
         data = data.to(device)
         optimizer.zero_grad()
         recon_batch, mu, logvar = model(data) #pytorch runs forward automatically
-        loss = loss_function(recon_batch, data, mu, logvar)
+        BCE, KLD = loss_function(recon_batch, data, mu, logvar)
+        BCE_tot += BCE
+        KLD_tot += KLD
+        loss = BCE + KLD
         loss.backward()
         train_loss += loss.item()
         optimizer.step()
@@ -134,8 +140,8 @@ def train(epoch):
                 100. * batch_idx / len(train_loader),
                 loss.item() / len(data)))
 
-    print('====> Epoch: {} Average loss: {:.4f}'.format(
-          epoch, train_loss / len(train_loader.dataset)))
+    print('====> Epoch: {} BCE loss: {:.4f} KLS loss: {:.4f}'.format(
+          epoch, BCE_tot/ len(train_loader.dataset), KLD_tot / len(train_loader.dataset)))
 
 
 def test(epoch):
@@ -145,7 +151,7 @@ def test(epoch):
         for i, (data, _) in enumerate(test_loader):
             data = data.to(device)
             recon_batch, mu, logvar = model(data)
-            test_loss += loss_function(recon_batch, data, mu, logvar).item()
+            test_loss += loss_function(recon_batch, data, mu, logvar, True).item()
             if i == 0:
                 n = min(data.size(0), 8)
                 comparison = torch.cat([data[:n],

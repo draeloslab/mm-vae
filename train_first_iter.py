@@ -8,7 +8,7 @@ from torchvision import datasets, transforms
 from torchvision.utils import save_image
 from get_dataset_first_iter import get_train_test_loaders
 from traverse_latent import umap_vis, create_umap_data, project_umap, quant_clusters
-from continual_VAE_first_iter import default_VAE#, weighted_VAE, generative_VAE
+from continual_VAE_first_iter import default_VAE, mult_guassian#, weighted_VAE, generative_VAE
 from quant_format_helper import write_cluster_quant_txt
 
 import os, sys
@@ -36,9 +36,9 @@ def get_args():
     parser.add_argument('--split', type=int, default=0, metavar='N',
                         help='what task splitting to use 0 = no split, 1 = 0-4, 5-9, 2 = even/odd, 3 = 0-4, 0-5, 4 = every 2 (5 total)')
     parser.add_argument('--model', type=int, default=0, metavar='N',
-                        help='what model to use, 0 = default, 1 = weighted, 2 = generative')
+                        help='what model to use, 0 = default, 1 = multi-guass, 2 = generative')
     parser.add_argument('--visualize', action='store_true', default=False,
-                        help='wheter to visualize with umaps') 
+                        help='wheter to visualize with umaps') #note that having visualize changes the quantification randomness
     parser.add_argument('--quantify', action='store_true', default=False,
                         help='wheter to quantify with inter intra dists')
     parser.add_argument('--projection', action='store_true', default=False,
@@ -94,19 +94,19 @@ def main(args, device, kwargs):
 
     model_dict = {
         0: 'default',
-        1: 'weighted',
+        1: 'multi_guassian',
         2: 'generative'
     }
     if args.model == 0:
         model = default_VAE().to(device)
     elif args.model == 1:
-        model = weighted_VAE().to(device)
+        model = mult_guassian(batch_size=args.batch_size).to(device)
     elif args.model == 2:
         model = generative_VAE().to(device)
     
     
     
-    optimizer = optim.Adam(model.parameters(), lr=1e-3)
+    optimizer = optim.Adam(model.parameters(), lr=1e-3) #probably want to make this kind of thing model specific when we add more
 
     projection_info = {}
     projection_labels = {}
@@ -120,7 +120,7 @@ def main(args, device, kwargs):
 
             avg_recon, avg_dkl = model.train_epoch(epoch, train_loader_list[task], device, optimizer, args.log_interval)
             umap_path = 'results/' + str(model_dict[args.model]) + '/split'+ str(args.split) +'/UMAPs/UMAP_' + 'task_' + str(task) + '_epoch_' +str(epoch)
-            if args.visualize:
+            if args.visualize and epoch == 5: #temp thing so I dont make a umap for each epoch (expensive)
                 #instead of avg loss over the epoch, you can get the final loss by returning recon_loss_tmp
                 test_recon, test_dkl = model.test_epoch(epoch, test_loader_list[task], device, args.batch_size, model_dict[args.model], str(args.split), str(task), str(task), vis = False)
                 mu_train, mu_test, labels_np_train, labels_np_test = umap_vis(model, epoch, task, umap_tr_loader, umap_te_loader, device, umap_path, avg_recon, avg_dkl, test_recon, test_dkl)
@@ -131,11 +131,11 @@ def main(args, device, kwargs):
 
             for previous_task in range(task+1):
                 test_recon, test_dkl = model.test_epoch(epoch, test_loader_list[previous_task], device, args.batch_size, model_dict[args.model], str(args.split), str(task), str(previous_task), vis = args.visualize)
-            with torch.no_grad():
-                sample = torch.randn(64, 20).to(device) #random numbers into the decoder to generate a random digit
-                sample = model.decode(sample).cpu() #generate  the new images
-                save_image(sample.view(64, 1, 28, 28),
-                        'results/' + model_dict[args.model] + '/split'+ str(args.split) +'/sample_' + 'task_' + str(task) + '_epoch_' +str(epoch) + '.png')
+            # with torch.no_grad(): #commented out because didnt want to deal with fitting size when  changing model params
+            #     sample = torch.randn(64, 20).to(device) #random numbers into the decoder to generate a random digit
+            #     sample = model.decode(sample).cpu() #generate  the new images
+            #     save_image(sample.view(64, 1, 28, 28),
+            #             'results/' + model_dict[args.model] + '/split'+ str(args.split) +'/sample_' + 'task_' + str(task) + '_epoch_' +str(epoch) + '.png')
         with torch.no_grad():
             if args.quantify:
                 #quantify cluster for each task
