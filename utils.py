@@ -4,10 +4,11 @@ import numpy as np
 def load_data(df):
     x = df.iloc[:, 1:-2].values.astype('float32')
     diet_label = df['Diet_num'].values - 1 
+    mouse_ids = df['MouseID']
     for column in range(x.shape[1]):
         x[:, column] = standardize(x[:, column])
     df_layer1 = x.copy()
-    return x, diet_label, df_layer1
+    return x, diet_label, df_layer1, mouse_ids
 
 def standardize(input_array):
     mean = np.nanmean(input_array)
@@ -23,4 +24,4 @@ def set_nans_extreme(df):
         df[min_col] = df[min_col].fillna(np.min(df[min_col]))
     for max_col in max_columns: 
         df[max_col] = df[max_col].fillna(np.max(df[max_col]))
-    return df 
+    return df

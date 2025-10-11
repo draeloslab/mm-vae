@@ -1,0 +1,22 @@
+data: 
+  latent_variable_path: '/Users/racheliritani/Desktop/AD Project/VAE-work/c-gmvae/nature_filtered_nonan_cfc.csv'
+  label_type: ymaze_alt
+  data_type: full
+  #cfc_path: '/Users/racheliritani/Desktop/AD Project/VAE-work/c-gmvae/cfc_data_filtered.csv'
+  #cfc_path: '/Users/racheliritani/Desktop/AD Project/VAE-work/c-gmvae/ymaze_speed_data_cleaned.csv'
+  #cfc_path: '/Users/racheliritani/Desktop/AD Project/VAE-work/c-gmvae/ymaze_distance_data_cleaned.csv'
+  cfc_path: '/Users/racheliritani/Desktop/AD Project/VAE-work/c-gmvae/ymaze_alt_data_cleaned.csv'
+training_params: 
+  epochs: 10000
+  batch_size: 128
+  learning_rate: 0.0001
+  num_k_folds: 5
+model_params: 
+  input_size: 2
+  hidden_size: 10
+  output_size: 1
+  latent_dim: 35
+output: 
+  output_folder: results_DIET/CGMVAE_rawdata/mlp
+runtime_config: 
+  accelerator: True # True means try to use GPU

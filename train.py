@@ -8,12 +8,12 @@ from utils import*
 import pandas as pd
 import os
 
-def train(epoch, model, train_loader, device, optimizer, log_interval, ks_weight, cv_weight, kl_weight, gmm_centers, gmm_std, model_type, test_loader, output_folder):
+def train(epoch, model, train_loader, device, optimizer, log_interval, ks_weight, cv_weight, kl_weight, gmm_centers, gmm_std, model_type, test_loader, output_folder, latent_dim):
     model.train()
     train_loss = 0
     recon_loss = 0
     kld_loss = 0
-    for batch_idx, (data, labels, df_layer1) in enumerate(train_loader):
+    for batch_idx, (data, labels, df_layer1, mouse_ids) in enumerate(train_loader):
         data = data.to(device)
         labels = labels.to(device)
         df_layer1 = df_layer1.to(device)
@@ -38,10 +38,10 @@ def train(epoch, model, train_loader, device, optimizer, log_interval, ks_weight
                 100. * batch_idx / len(train_loader),
                 loss.item() / len(data)))
     
-    if epoch in [200, 500, 1000, 2000, 3000, 5000]:
+    if epoch in [200, 500, 1000, 2000, 2500, 3000, 3500, 4000, 4500, 5000, 5500, 6500, 7000, 8000, 10000, 15000, 20000]:
         try:
             with torch.no_grad():
-                test_data, test_labels, df_layer1 = next(iter(test_loader))
+                test_data, test_labels, df_layer1, mouse_ids = next(iter(test_loader))
                 test_data = test_data.to(device)
                 test_labels = test_labels.to(device)
                 if model_type == 'CGMVAE':
@@ -49,8 +49,9 @@ def train(epoch, model, train_loader, device, optimizer, log_interval, ks_weight
                 else: 
                     recons, mu, logvar, z = model.forward(test_data)
                 latent_vectors = z.detach().cpu().numpy()
-                latent_space = pd.DataFrame(latent_vectors, columns=[f'LV{i+1}' for i in range(2)])
+                latent_space = pd.DataFrame(latent_vectors, columns=[f'LV{i+1}' for i in range(latent_dim)])
                 latent_space['labels'] = test_labels.detach().cpu().numpy()
+                latent_space['mouse_ids'] = list(mouse_ids)
                 latent_space.to_csv(os.path.join(output_folder, f'latent_variables_epoch{epoch}.csv'), index=False)
                 print('Latent variables saved')
 

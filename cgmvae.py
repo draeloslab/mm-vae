@@ -7,17 +7,18 @@ from torch.nn import functional as F
 import sys
 
 class CGMVAE(nn.Module):
-    def __init__(self, num_gaussian=5):
+    def __init__(self, num_gaussian=5, latent_dim=35):
         super(CGMVAE, self).__init__()
 
         self.num_gaussian = num_gaussian
+        self.latent_dim = latent_dim
         self.label = nn.Embedding(num_gaussian, 1)
 
         self.fc1 = nn.Linear(35 + 1, 16)
         self.bn1 = nn.BatchNorm1d(16)
-        self.fc21 = nn.Linear(16, num_gaussian*2)
-        self.fc22 = nn.Linear(16, num_gaussian*2)
-        self.fc3 = nn.Linear(2 + 1, 16)
+        self.fc21 = nn.Linear(16, num_gaussian*latent_dim)
+        self.fc22 = nn.Linear(16, num_gaussian*latent_dim)
+        self.fc3 = nn.Linear(latent_dim + 1, 16)
         self.bn3 = nn.BatchNorm1d(16)
         self.fc4 = nn.Linear(16, 35)
 
@@ -28,8 +29,8 @@ class CGMVAE(nn.Module):
         h1_linear = self.fc1(x)
         h1_bn = self.bn1(h1_linear)
         h1_act = F.tanh(h1_bn)
-        mu = self.fc21(h1_act).view(-1, self.num_gaussian, 2)
-        logvar = self.fc22(h1_act).view(-1, self.num_gaussian, 2)
+        mu = self.fc21(h1_act).view(-1, self.num_gaussian, self.latent_dim)
+        logvar = self.fc22(h1_act).view(-1, self.num_gaussian, self.latent_dim)
         return mu, logvar
 
     # reparameterization reconstructs the sample process by sampling 
