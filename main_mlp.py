@@ -56,11 +56,11 @@ elif data_type == 'full':
     latent_columns = ['Generation', 'SurvDays', 'Y1_CBC_Hgb', 'Y2_CBC_Hgb', 'Y3_CBC_Hgb', 'Y1_Rotarod_Mean', 'Y2_Rotarod_Mean', 'Y3_Rotarod_Mean', 'Y1_Wheel_AvgSpeedLFC', 'Y2_Wheel_AvgSpeedLFC', 'Y3_Wheel_AvgSpeedLFC', 'Y1_Wheel_AvgDistLFC', 'Y2_Wheel_AvgDistLFC', 'Y3_Wheel_AvgDistLFC', 'Y1A_Grip_All', 'Y2A_Grip_All', 'Y3A_Grip_All', 'Y1A_BW_BW', 'Y2A_BW_BW', 'Y3A_BW_BW', 'Y1_Glu.F_Glucose', 'Y2_Glu.F_Glucose', 'Y3_Glu.F_Glucose', 'Y1_Echo_BPM', 'Y2_Echo_BPM', 'Y3_Echo_BPM', 'Y1_Echo_CardiacOutput', 'Y2_Echo_CardiacOutput', 'Y3_Echo_CardiacOutput', 'Y1_AS_MeanLog', 'Y2_AS_MeanLog', 'Y3_AS_MeanLog','Y1A_Frailty_FrailtyAdj', 'Y2A_Frailty_FrailtyAdj', 'Y3A_Frailty_FrailtyAdj']
 train_df.loc[:, latent_columns] = scaler.fit_transform(train_df[latent_columns])
 test_df.loc[:, latent_columns] = scaler.fit_transform(test_df[latent_columns])
-X_train_tensor = torch.tensor(train_df[latent_columns].values, dtype=torch.float32)
+X_train_tensor = torch.tensor(train_df[latent_columns + ['labels']].values, dtype=torch.float32)
 y_train_tensor = torch.tensor(train_df[label_col].values, dtype=torch.float32)
 train_dataset = TensorDataset(X_train_tensor, y_train_tensor)
 train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
-X_test_tensor = torch.tensor(test_df[latent_columns].values, dtype=torch.float32)
+X_test_tensor = torch.tensor(test_df[latent_columns + ['labels']].values, dtype=torch.float32)
 y_test_tensor = torch.tensor(test_df[label_col].values, dtype=torch.float32)
 test_dataset = TensorDataset(X_test_tensor, y_test_tensor)
 test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=True)
@@ -141,6 +141,7 @@ for fold, (train_ids, val_ids) in enumerate(kfold.split(train_dataset)):
     
     fold_loss_results[fold] = {'train': train_losses, 'val': val_losses}
 
+    diets = []
     predictions = []
     true_labels = []
     with torch.no_grad():
@@ -149,22 +150,24 @@ for fold, (train_ids, val_ids) in enumerate(kfold.split(train_dataset)):
             labels = labels.to(device)
             preds = model(data)
 
+            diets.extend(data[:, -1].cpu().numpy().flatten())
             predictions.extend(preds.cpu().numpy().flatten())
             true_labels.extend(labels.cpu().numpy().flatten())
 
-    fold_predictions[fold] = {'predictions': predictions, 'true_labels': true_labels}
+    fold_predictions[fold] = {'diets': diets, 'predictions': predictions, 'true_labels': true_labels}
     #fold_predictions[fold] = {'predictions': predictions}
 
 all_preds = []
 for fold_number, results in fold_predictions.items():
-    for prediction, true in zip(results['predictions'], results['true_labels']):
+    for diet, prediction, true in zip(results['diets'], results['predictions'], results['true_labels']):
     #for prediction in results['predictions']:
         all_preds.append({ 
             'fold': fold_number,
+            'diet': diet,
             'predicted_label': prediction,
             'true_label': true
         })
-fold_predictions_df = pd.DataFrame(all_preds, columns=['fold', 'predicted_label', 'true_label'])
+fold_predictions_df = pd.DataFrame(all_preds, columns=['fold', 'diet', 'predicted_label', 'true_label'])
 fold_predictions_df.to_csv(os.path.join(output_folder, 'val_' + str(label_type) + '_predictions.csv'), index=False)
 
 fig, ax = plt.subplots(1, 2, figsize=(12, 5))

@@ -8,9 +8,9 @@ class VAE(nn.Module):
         super(VAE, self).__init__()
 
         self.fc1 = nn.Linear(35, 16)
-        self.fc21 = nn.Linear(16, 2)
-        self.fc22 = nn.Linear(16, 2)
-        self.fc3 = nn.Linear(2, 16)
+        self.fc21 = nn.Linear(16, 5)
+        self.fc22 = nn.Linear(16, 5)
+        self.fc3 = nn.Linear(5, 16)
         self.fc4 = nn.Linear(16, 35)
 
     def encode(self, x):

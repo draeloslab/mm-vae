@@ -3,13 +3,13 @@ import torch.nn as nn
 import torch.optim as optim 
 
 class simple_mlp(nn.Module):
-    def __init__(self, latent_dim=35):
+    def __init__(self, latent_dim=5):
         super(simple_mlp, self).__init__()
         self.latent_dim = latent_dim
-        self.fc1 = nn.Linear(latent_dim, 10)
+        self.fc1 = nn.Linear(latent_dim + 1, 20)
         self.tanh1 = nn.Tanh()
         #self.relu = nn.ReLU()]
-        self.fc2 = nn.Linear(10, 1)
+        self.fc2 = nn.Linear(20, 1)
         #self.tanh2 = nn.Tanh()
         #self.tanh = nn.Tanh()
         #self.fc3 = nn.Linear(32, 1)
@@ -20,7 +20,7 @@ class simple_mlp(nn.Module):
         out = self.tanh1(out)
         out = self.fc2(out)
         #out = self.tanh2(out)
-        #out = self.fc3(out)xs
+        #out = self.fc3(out)  
         return out 
     
 

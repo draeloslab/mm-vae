@@ -7,15 +7,17 @@ from data_builder import DataBuilder
 import pandas as pd 
 
 from cgmvae import*
+from vae import*
  
 def load_config(config_name):
     with open(os.path.join(config_name)) as file:
         config = yaml.safe_load(file)
     return config
 
-model_weights = '/Users/racheliritani/Desktop/AD Project/mm-vae/results_DIET/CGMVAE_dim5_v2/saved_model_epoch1000.pth'
+model_weights = '/Users/racheliritani/Desktop/AD Project/mm-vae/results_DIET/VanillaVAE_5dim/saved_model_epoch5000.pth'
 data_path = '/Users/racheliritani/Desktop/AD Project/VAE-work/c-gmvae/nature_filtered_nonan_cfc.csv'
-output_path = '/Users/racheliritani/Desktop/AD Project/mm-vae/cfc/gmm_5dim_v2'
+output_path = '/Users/racheliritani/Desktop/AD Project/mm-vae/cfc/vanilla_vae_5dim'
+latent_dim = 5
 os.makedirs(output_path, exist_ok=True)
 
 accelerator = True 
@@ -43,10 +45,12 @@ model.eval()
 for batch_idx, (data, labels, df_layer1, mouse_ids) in enumerate(test_loader):
     data = data.to(device)
     labels = labels.to(device)
-    recon_batch, mu, logvar, z = model(data, labels)
+    # pass in labels if you are using C-GMVAE but no labels if you are using normal VAE 
+    #recon_batch, mu, logvar, z = model(data, labels)
+    recon_batch, mu, logvar, z = model(data)
 
     latent_vectors = z.detach().cpu().numpy()
-    latent_space = pd.DataFrame(latent_vectors, columns=[f'LV{i+1}' for i in range(5)])
+    latent_space = pd.DataFrame(latent_vectors, columns=[f'LV{i+1}' for i in range(latent_dim)])
     latent_space['labels'] = labels.detach().cpu().numpy()
     len(mouse_ids)
     latent_space['mouse_ids'] = list(mouse_ids)
