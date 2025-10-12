@@ -7,8 +7,8 @@ data:
   #cfc_path: '/Users/racheliritani/Desktop/AD Project/VAE-work/c-gmvae/ymaze_distance_data_cleaned.csv'
   #cfc_path: '/Users/racheliritani/Desktop/AD Project/VAE-work/c-gmvae/ymaze_alt_data_cleaned.csv'
 training_params: 
-  epochs: 5000
-  batch_size: 128
+  epochs: 1000
+  batch_size: 32
   learning_rate: 0.001
   num_k_folds: 5
 model_params: 
@@ -17,6 +17,6 @@ model_params:
   output_size: 1
   latent_dim: 5
 output: 
-  output_folder: results_DIET/VanillaVAE_5dim/mlp
+  output_folder: results_DIET/VanillaVAE_5dim/mlp_test
 runtime_config: 
   accelerator: True # True means try to use GPU
