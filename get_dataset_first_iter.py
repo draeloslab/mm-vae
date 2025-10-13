@@ -57,6 +57,8 @@ def _indices_for_labels(ds, labels): #gpt function to get indices of targets. Pr
 
 
 def get_train_test_loaders(batch_size, split, root="../data", download=True, **kwargs):
+    gen = torch.Generator()
+    gen.manual_seed(0)
     #need the dataset first not the dataloader to create subset then dataloader
     full_train_dataset = datasets.MNIST('../data', train=True, download=True, transform=transforms.ToTensor())
     full_test_dataset =datasets.MNIST('../data', train=False, download=True, transform=transforms.ToTensor())

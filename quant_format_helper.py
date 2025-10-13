@@ -3,12 +3,17 @@ from datetime import datetime
 from pathlib import Path
 
 def write_cluster_quant_txt(
+    ari_tr: float,
+    nmi_tr: float,
+    ari_te: float,
+    nmi_te: float,
     inter_dists_tr: dict,
     intra_dists_tr: dict,
     inter_dists_te: dict,
     intra_dists_te: dict,
     task: int,
     split: int,
+    model: str,
     filename: str | None = None,
     title: str | None = None,
 ):
@@ -30,7 +35,7 @@ def write_cluster_quant_txt(
 
     # File path (use .tsv for Excel-friendliness)
     if filename is None:
-        file_path = Path(f"results/default/split{split}/cluster_quant/task{task}_cluster_quant.tsv")
+        file_path = Path(f"results/{model}/split{split}/cluster_quant/task{task}_cluster_quant.tsv")
     else:
         file_path = Path(filename)
 
@@ -52,6 +57,10 @@ def write_cluster_quant_txt(
     lines = []
     lines.append(f"# {title}")
     lines.append(f"# Task\t{task}")
+    lines.append(f"# ari_tr\t{ari_tr:.6f}")
+    lines.append(f"# nmi_tr\t{nmi_tr:.6f}")
+    lines.append(f"# ari_te\t{ari_te:.6f}")
+    lines.append(f"# nmi_te\t{nmi_te:.6f}")
     lines.append(f"# Generated\t{now}")
     lines.append("\t".join(headers))
 
@@ -84,7 +93,6 @@ def write_cluster_quant_txt(
     # End marker (commented)
     lines.append("# END CLUSTER INFO")
 
-    # Write file
     with open(file_path, "w", encoding="utf-8") as f:
         f.write("\n".join(lines))
 

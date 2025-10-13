@@ -13,6 +13,13 @@ import pandas as pd
 from get_dataset_first_iter import _indices_for_labels
 from matplotlib.colors import ListedColormap, BoundaryNorm
 import umap
+from sklearn.metrics import pairwise_distances
+from sklearn.metrics import silhouette_score
+from sklearn.cluster import KMeans
+from sklearn.metrics import adjusted_rand_score, normalized_mutual_info_score
+from sklearn.preprocessing import StandardScaler
+from sklearn.cluster import SpectralClustering
+from sklearn.mixture import GaussianMixture
 
 # I also want to create a way to traverse the latent space by taking the means of two numbers and going in a straight line, 
 #then also by implementing stepwise density based trajectory
@@ -26,6 +33,8 @@ def traverse_latent_linear():
 
 def traverse_latent_stepwise_density():
     pass
+
+    
 
 #this function just returns a numpy array usable with the umap function
 #the numpy array is composed of the data from the current task and all previous tasks the model has trained on
@@ -61,7 +70,7 @@ def create_umap_data(labels, batch_size):
 
     return tr_loader, te_loader
 
-def plot_umap(path, task_num, epoch, embedding, labels_np, data_type, avg_recon, avg_dkl, projected):
+def plot_umap(path, task_num, epoch, embedding, labels_np, data_type, avg_recon, avg_dkl, ari, nmi,  projected, gmm_centers = None, gmm_std = None, reducer = None, std_samples = 360):#ari, nmi,  projected):
 
     plt.figure(figsize=(6,5), dpi=140)
     # use 10 distinct colors rather than a continuous colormap
@@ -80,8 +89,41 @@ def plot_umap(path, task_num, epoch, embedding, labels_np, data_type, avg_recon,
     cbar = plt.colorbar(sc, boundaries=bounds, ticks=np.arange(10))
     cbar.set_label('Digit')
 
+     # GMM prior centers + 1-std, this would be more complex if the stds were different or learnable obviously
+    if (gmm_centers is not None) and (reducer is not None)and (gmm_std is not None):
+        centers_np = gmm_centers.detach().cpu().numpy()
+        k, latent_dim = centers_np.shape      
+
+        #project centers
+        centers_2d = reducer.transform(centers_np)
+        #plot centers as X
+        ax.scatter(centers_2d[:,0], centers_2d[:,1],
+                   marker='x', s=80, linewidths=2, zorder=5, c='black')
+
+        # std
+        rng = np.random.default_rng(42)
+        colors = plt.cm.tab10(np.linspace(0, 1, k))
+        for i in range(k):
+            points = rng.normal(size=(std_samples, latent_dim)).astype(np.float32) #draw random points in latent 
+            points /= np.linalg.norm(points, axis=1, keepdims=True) + 1e-12 #make it unit length (add a little cuz 0)
+            shell = centers_np[i][None, :] + gmm_std * points # make it a std away
+            shell_2d = reducer.transform(shell) #put into umap space
+
+            #find the middle of the random points and then order them in a circle so we can connect them gpt help
+            #print(centers_2d)
+            ctr = centers_2d[i]
+            ang = np.arctan2(shell_2d[:,1] - ctr[1], shell_2d[:,0] - ctr[0])
+            order = np.argsort(ang, kind='mergesort')
+            ring = shell_2d[order]
+
+            ring_closed = np.vstack([ring, ring[0:1]])   # repeat first point to close
+            ax.plot(ring_closed[:,0], ring_closed[:,1],
+                    color=colors[i], linewidth=1.6, alpha=0.9, zorder=4,
+                    solid_joinstyle='round', solid_capstyle='round')
+
+
     if not projected:
-        textstr = f"avg recon loss: {avg_recon:.4f}\navg dkl loss: {avg_dkl:.4f}"
+        textstr = f"avg recon loss: {avg_recon:.4f}\navg dkl loss: {avg_dkl:.4f}\nARI score: {ari:.4f}\nNMI score: {nmi:.4f}"#\n dunn_score: {sil_score:.4f}" #\nARI score: {ari:.4f}\nNMI score: {nmi:.4f}"
         ax.text(
             0.98, 0.02, textstr,
             transform=ax.transAxes, ha='right', va='bottom',
@@ -116,23 +158,26 @@ def get_embedding(loader, device, model):
     reducer = reducer.fit(feats_np)
     embedding = reducer.transform(feats_np)
     print(embedding.shape)
-    return embedding, labels_np, feats_np
+    return embedding, labels_np, feats_np, reducer
     
 
-def umap_vis(model, epoch, task_num, umap_tr_loader, umap_te_loader, device, path, avg_recon, avg_dkl, test_recon, test_dkl, projected = False):  #https://umap-learn.readthedocs.io/en/latest/basic_usage.html
+def umap_vis(model, epoch, task_num, umap_tr_loader, umap_te_loader, device, path, avg_recon, avg_dkl, test_recon, test_dkl, projected = False, gmm_centers = None, gmm_std = None):  #https://umap-learn.readthedocs.io/en/latest/basic_usage.html
                 #theres a thing where you can see the numbers on the umap, but not worht the time because rna-seq
     model.eval() #you need with no_grad, some things act differently unless in eval mode
     with torch.no_grad():
         #run the umap data through the encoder
         
-        embedding, labels_np_train, mu_train= get_embedding(umap_tr_loader, device, model)
-        plot_umap(path, task_num, epoch, embedding, labels_np_train, "Train", avg_recon, avg_dkl, projected)
+        embedding, labels_np_train, mu_train, reducer= get_embedding(umap_tr_loader, device, model)
+        ari, nmi = get_ARI_NMI(umap_tr_loader, model, device)
+        sil_score = get_silhouette_score(umap_tr_loader, model, device)
+        plot_umap(path, task_num, epoch, embedding, labels_np_train, "Train", avg_recon, avg_dkl, ari, nmi, projected, gmm_centers = gmm_centers, gmm_std = gmm_std, reducer = reducer) #ari, nmi, projected)
 
 
         #TEST DATA
         #run the umap data through the encoder
-        embedding, labels_np_test, mu_test= get_embedding(umap_te_loader, device, model)
-        plot_umap(path, task_num, epoch, embedding, labels_np_test, "Test", test_recon, test_dkl, projected)
+        embedding, labels_np_test, mu_test, reducer= get_embedding(umap_te_loader, device, model)
+        ari, nmi = get_ARI_NMI(umap_te_loader, model, device)
+        plot_umap(path, task_num, epoch, embedding, labels_np_test, "Test", test_recon, test_dkl, ari, nmi, projected, gmm_centers = gmm_centers, gmm_std = gmm_std, reducer = reducer) #ari, nmi, projected)
 
     return mu_train, mu_test, labels_np_train, labels_np_test
 
@@ -241,13 +286,100 @@ def dist_from_means(loader, model, device, means): #little help from gpt, but th
 
     return inter_dists, intra_dists
 
+def get_ARI_NMI(loader, model, device):
+    print("for timing", flush = True)
+    X = []
+    labels_tot = []
+    n = 0
+    model.eval()
+    with torch.no_grad():
+        for inputs, labels in loader:
+            #print(inputs.size())
+            mus, _ = model.encode(inputs.view(-1, 784).to(device))   # (batch_size, latent_dim) 784 is 28 by 28 image btw
+            #print(mus.size())
+            mus = mus.cpu().numpy()
+            labels2 = labels.cpu().numpy()
+
+            X.append(mus)
+            labels_tot.append(labels2)
+            n += labels.size(0)
+
+        X = np.concatenate(X, axis=0)
+        #X = StandardScaler().fit_transform(X) #to avoid a certain dimension from over powering
+        y = np.concatenate(labels_tot, axis=0)
+
+        unique_labels = np.unique(y)
+        if unique_labels.size < 2:
+            print("not enough labels", flush=True)
+            return float("nan"), float("nan")
+        
+        k = unique_labels.size
+        gmm = GaussianMixture(
+        n_components=k,
+        covariance_type='full',
+        n_init=10,
+        reg_covar=1e-6,
+        random_state=42,
+        init_params='kmeans'
+        )
+        yk = gmm.fit_predict(X)  # component labels
+
+        ari = float(adjusted_rand_score(y, yk))
+        nmi = float(normalized_mutual_info_score(y, yk))
+       
+        # k = unique_labels.size
+        # km = KMeans(n_clusters=k, n_init=10, random_state=42)
+        # yk = km.fit_predict(X)
+
+        # ari = float(adjusted_rand_score(y, yk))
+        # nmi = float(normalized_mutual_info_score(y, yk))
+
+        print("end timing", flush=True)
+    return ari, nmi
+
+def get_silhouette_score(loader, model, device):
+    print("for timing", flush = True)
+    X = []
+    labels_tot = []
+    n = 0
+    model.eval()
+    with torch.no_grad():
+        for inputs, labels in loader:
+            #print(inputs.size())
+            mus, _ = model.encode(inputs.view(-1, 784).to(device))   # (batch_size, latent_dim) 784 is 28 by 28 image btw
+            #print(mus.size())
+            mus = mus.cpu().numpy()
+            labels2 = labels.cpu().numpy()
+
+            X.append(mus)
+            labels_tot.append(labels2)
+            n += labels.size(0)
+
+        X = np.concatenate(X, axis=0)
+        y = np.concatenate(labels_tot, axis=0)
+
+        score = silhouette_score(X, y)
+
+    print("end timing", flush = True)
+    return score
+
+
+
+
+
 def quant_clusters(model, loader_tr, loader_te, task, device):
     model.eval() #you need with no_grad, some things act differently unless in eval mode
     with torch.no_grad():
         means = find_means(loader_tr, model, device)
         inter_dists_tr, intra_dists_tr = dist_from_means(loader_tr, model, device, means)
+        ari_tr, nmi_tr = get_ARI_NMI(loader_tr, model, device)
+        #sil_score_tr = get_silhouette_score(loader_tr, model, device)
 
         means = find_means(loader_te, model, device)
         inter_dists_te, intra_dists_te = dist_from_means(loader_te, model, device, means)
+        ari_te, nmi_te = get_ARI_NMI(loader_te, model, device)
+        #sil_score_te = get_silhouette_score(loader_te, model, device)
 
-    return inter_dists_tr, intra_dists_tr, inter_dists_te, intra_dists_te
+        
+
+    return inter_dists_tr, intra_dists_tr, inter_dists_te, intra_dists_te, ari_tr, nmi_tr, ari_te, nmi_te#sil_score_tr, sil_score_te

@@ -27,13 +27,13 @@ from loss import get_gmmvaeloss, estimate_loss_coefficients
 #using accuracy to judge
 
 class default_VAE(VAE):
-    def __init__(self):
+    def __init__(self, latent_size):
         super().__init__()
 
         self.fc1 = nn.Linear(784, 100)
-        self.fc21 = nn.Linear(100, 9) #for means
-        self.fc22 = nn.Linear(100, 9) #for stds
-        self.fc3 = nn.Linear(9, 100) #the output just needs one because you sample and reconstruct
+        self.fc21 = nn.Linear(100, latent_size) #for means
+        self.fc22 = nn.Linear(100, latent_size) #for stds
+        self.fc3 = nn.Linear(latent_size, 100) #the output just needs one because you sample and reconstruct
         self.fc4 = nn.Linear(100, 784)
 
     def encode(self, x):

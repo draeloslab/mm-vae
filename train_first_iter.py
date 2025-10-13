@@ -10,6 +10,8 @@ from get_dataset_first_iter import get_train_test_loaders
 from traverse_latent import umap_vis, create_umap_data, project_umap, quant_clusters
 from continual_VAE_first_iter import default_VAE, mult_guassian#, weighted_VAE, generative_VAE
 from quant_format_helper import write_cluster_quant_txt
+import random
+import numpy as np
 
 import os, sys
 print("[DEBUG] running:", __file__)
@@ -27,6 +29,10 @@ def get_args():
                         help='input batch size for training (default: 128)')
     parser.add_argument('--epochs', type=int, default=5, metavar='N',
                         help='number of epochs to train per task(default: 5)')
+    parser.add_argument('--latent_size', type=int, default=5, metavar='N',
+                        help='size of latent space')
+    parser.add_argument('--lr', type=float, default=1e-3, metavar='N',
+                        help='learning rate')
     parser.add_argument('--no-accel', action='store_true', 
                         help='disables accelerator')
     parser.add_argument('--seed', type=int, default=1, metavar='S',
@@ -61,6 +67,16 @@ def pick_device(disable=False):
     return torch.device("cpu")
 
 def other_setup(args):
+    #for determinism
+    os.environ["PYTHONHASHSEED"] = str(args.seed)
+    os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":16:8"
+    random.seed(args.seed)
+    np.random.seed(args.seed)
+    torch.cuda.manual_seed_all(args.seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+    torch.use_deterministic_algorithms(True, warn_only=True)
+
     device = pick_device(args.no_accel)
     use_accel = device.type in ("cuda", "mps", "xpu")
     #end of what gpt said. should change back to below on other
@@ -98,15 +114,15 @@ def main(args, device, kwargs):
         2: 'generative'
     }
     if args.model == 0:
-        model = default_VAE().to(device)
+        model = default_VAE(latent_size=args.latent_size).to(device)
     elif args.model == 1:
-        model = mult_guassian(batch_size=args.batch_size).to(device)
+        model = mult_guassian(latent_size=args.latent_size, batch_size=args.batch_size).to(device)
     elif args.model == 2:
         model = generative_VAE().to(device)
     
     
     
-    optimizer = optim.Adam(model.parameters(), lr=1e-3) #probably want to make this kind of thing model specific when we add more
+    optimizer = optim.Adam(model.parameters(), lr=args.lr) #1e-3 probably want to make this kind of thing model specific when we add more
 
     projection_info = {}
     projection_labels = {}
@@ -122,12 +138,20 @@ def main(args, device, kwargs):
             umap_path = 'results/' + str(model_dict[args.model]) + '/split'+ str(args.split) +'/UMAPs/UMAP_' + 'task_' + str(task) + '_epoch_' +str(epoch)
             if args.visualize and epoch == 5: #temp thing so I dont make a umap for each epoch (expensive)
                 #instead of avg loss over the epoch, you can get the final loss by returning recon_loss_tmp
-                test_recon, test_dkl = model.test_epoch(epoch, test_loader_list[task], device, args.batch_size, model_dict[args.model], str(args.split), str(task), str(task), vis = False)
-                mu_train, mu_test, labels_np_train, labels_np_test = umap_vis(model, epoch, task, umap_tr_loader, umap_te_loader, device, umap_path, avg_recon, avg_dkl, test_recon, test_dkl)
-                projection_info[str(task)+"_" + str(epoch)+"train"] = mu_train
-                projection_info[str(task)+"_" + str(epoch)+"test"] = mu_test
-                projection_labels[str(task)+"_" + str(epoch)+"train"] = labels_np_train
-                projection_labels[str(task)+"_" + str(epoch)+"test"] = labels_np_test
+                if args.model == 1:
+                    test_recon, test_dkl = model.test_epoch(epoch, test_loader_list[task], device, args.batch_size, model_dict[args.model], str(args.split), str(task), str(task), vis = False)
+                    mu_train, mu_test, labels_np_train, labels_np_test = umap_vis(model, epoch, task, umap_tr_loader, umap_te_loader, device, umap_path, avg_recon, avg_dkl, test_recon, test_dkl, gmm_centers = model.gmm_centers, gmm_std = model.gmm_std)
+                else:
+                    test_recon, test_dkl = model.test_epoch(epoch, test_loader_list[task], device, args.batch_size, model_dict[args.model], str(args.split), str(task), str(task), vis = False)
+                    mu_train, mu_test, labels_np_train, labels_np_test = umap_vis(model, epoch, task, umap_tr_loader, umap_te_loader, device, umap_path, avg_recon, avg_dkl, test_recon, test_dkl)
+                
+                
+
+                if args.projection:
+                    projection_info[str(task)+"_" + str(epoch)+"train"] = mu_train
+                    projection_info[str(task)+"_" + str(epoch)+"test"] = mu_test
+                    projection_labels[str(task)+"_" + str(epoch)+"train"] = labels_np_train
+                    projection_labels[str(task)+"_" + str(epoch)+"test"] = labels_np_test
 
             for previous_task in range(task+1):
                 test_recon, test_dkl = model.test_epoch(epoch, test_loader_list[previous_task], device, args.batch_size, model_dict[args.model], str(args.split), str(task), str(previous_task), vis = args.visualize)
@@ -139,7 +163,7 @@ def main(args, device, kwargs):
         with torch.no_grad():
             if args.quantify:
                 #quantify cluster for each task
-                inter_dists_tr, intra_dists_tr, inter_dists_te, intra_dists_te = quant_clusters(model, umap_tr_loader, umap_te_loader, task, device)
+                inter_dists_tr, intra_dists_tr, inter_dists_te, intra_dists_te, ari_tr, nmi_tr, ari_te, nmi_te = quant_clusters(model, umap_tr_loader, umap_te_loader, task, device)
                 #just use all the info from the last epoch on the task from above
                 print("CLUSTER QUANT INFO")
                 print(inter_dists_tr)
@@ -148,7 +172,12 @@ def main(args, device, kwargs):
                 print(intra_dists_te)
                 print("END CLUSTER INFO")
 
-                write_cluster_quant_txt(inter_dists_tr, intra_dists_tr, inter_dists_te, intra_dists_te, task, args.split)
+                print("ari score train: ", ari_tr)
+                print("nmi score train: ", nmi_tr)
+                print("ari score train: ", ari_tr)
+                print("nmi score train: ", nmi_te)
+
+                write_cluster_quant_txt(ari_tr, nmi_tr, ari_te, nmi_te, inter_dists_tr, intra_dists_tr, inter_dists_te, intra_dists_te, task, args.split, model_dict[args.model])
     if args.projection:
         print("LEN PROJECCTION INFO AND PROJECTION LABELS")
         print(len(projection_info))
