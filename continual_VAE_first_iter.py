@@ -123,7 +123,7 @@ class default_VAE(VAE):
     
 
 
-class mult_guassian(VAE):
+class mult_guassian(VAE): #Note: these inputs aren't parameters in train.py, so you mess with it here
     def __init__(self,latent_size = 9, gmm_std = 2.0, data_loss_weight = 1.0, batch_size = 128, k = 3): 
         #just what they used for now, need to fix batch size to take in args later
         super().__init__()

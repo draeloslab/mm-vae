@@ -70,6 +70,7 @@ def create_umap_data(labels, batch_size):
 
     return tr_loader, te_loader
 
+#plots the UMAPS with means of multi-gaussina and variance if applicable. also can do projection
 def plot_umap(path, task_num, epoch, embedding, labels_np, data_type, avg_recon, avg_dkl, ari, nmi,  projected, gmm_centers = None, gmm_std = None, reducer = None, std_samples = 360):#ari, nmi,  projected):
 
     plt.figure(figsize=(6,5), dpi=140)
@@ -141,6 +142,7 @@ def plot_umap(path, task_num, epoch, embedding, labels_np, data_type, avg_recon,
         plt.savefig(path + "_" + data_type +  "_epoch_" + str(epoch)+"_data_projected.png")
         plt.close()
 
+#gets the umap embedding and reducer used in plot_umap
 def get_embedding(loader, device, model):
     feats, labels = [], []
     for (data, label_data) in loader:
@@ -160,7 +162,7 @@ def get_embedding(loader, device, model):
     print(embedding.shape)
     return embedding, labels_np, feats_np, reducer
     
-
+#gets everything and plots umap
 def umap_vis(model, epoch, task_num, umap_tr_loader, umap_te_loader, device, path, avg_recon, avg_dkl, test_recon, test_dkl, projected = False, gmm_centers = None, gmm_std = None):  #https://umap-learn.readthedocs.io/en/latest/basic_usage.html
                 #theres a thing where you can see the numbers on the umap, but not worht the time because rna-seq
     model.eval() #you need with no_grad, some things act differently unless in eval mode
