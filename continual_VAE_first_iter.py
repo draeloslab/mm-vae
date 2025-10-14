@@ -127,7 +127,7 @@ class mult_guassian(VAE):
     def __init__(self,latent_size = 9, gmm_std = 2.0, data_loss_weight = 1.0, batch_size = 128, k = 3): 
         #just what they used for now, need to fix batch size to take in args later
         super().__init__()
-        gmm_centers = torch.randn(k, latent_size) * .1 #made this my own because no clue where 1-30 comes from, just randomized them pretty close to zero
+        gmm_centers = torch.randn(k, latent_size) * 1 #made this my own because no clue where 1-30 comes from, just randomized them pretty close to zero
         print(gmm_centers)
         self.register_buffer("gmm_centers", gmm_centers)
         ks_weight, cv_weight = estimate_loss_coefficients(batch_size, gmm_centers, gmm_std, num_samples=100)

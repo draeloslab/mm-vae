@@ -136,7 +136,7 @@ def main(args, device, kwargs):
 
             avg_recon, avg_dkl = model.train_epoch(epoch, train_loader_list[task], device, optimizer, args.log_interval)
             umap_path = 'results/' + str(model_dict[args.model]) + '/split'+ str(args.split) +'/UMAPs/UMAP_' + 'task_' + str(task) + '_epoch_' +str(epoch)
-            if args.visualize and epoch == 5: #temp thing so I dont make a umap for each epoch (expensive)
+            if args.visualize:# and epoch == 5 and task == 4: #temp thing so I dont make a umap for each epoch (expensive)
                 #instead of avg loss over the epoch, you can get the final loss by returning recon_loss_tmp
                 if args.model == 1:
                     test_recon, test_dkl = model.test_epoch(epoch, test_loader_list[task], device, args.batch_size, model_dict[args.model], str(args.split), str(task), str(task), vis = False)

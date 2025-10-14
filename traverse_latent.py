@@ -102,7 +102,7 @@ def plot_umap(path, task_num, epoch, embedding, labels_np, data_type, avg_recon,
 
         # std
         rng = np.random.default_rng(42)
-        colors = plt.cm.tab10(np.linspace(0, 1, k))
+        colors = plt.cm.Accent(np.linspace(0, 1, k))
         for i in range(k):
             points = rng.normal(size=(std_samples, latent_dim)).astype(np.float32) #draw random points in latent 
             points /= np.linalg.norm(points, axis=1, keepdims=True) + 1e-12 #make it unit length (add a little cuz 0)
