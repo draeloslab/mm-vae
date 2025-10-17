@@ -2,16 +2,17 @@ import torch
 import torch.utils.data
 from torch import nn
 from torch.nn import functional as F
+import sys
 
 class VAE(nn.Module):
     def __init__(self):
         super(VAE, self).__init__()
 
-        self.fc1 = nn.Linear(35, 16)
-        self.fc21 = nn.Linear(16, 5)
-        self.fc22 = nn.Linear(16, 5)
-        self.fc3 = nn.Linear(5, 16)
-        self.fc4 = nn.Linear(16, 35)
+        self.fc1 = nn.Linear(36, 16)
+        self.fc21 = nn.Linear(16, 2)
+        self.fc22 = nn.Linear(16, 2)
+        self.fc3 = nn.Linear(2, 16)
+        self.fc4 = nn.Linear(16, 36)
 
     def encode(self, x):
         h1 = F.tanh(self.fc1(x))
@@ -30,6 +31,6 @@ class VAE(nn.Module):
         return self.fc4(h3)
 
     def forward(self, x):
-        mu, logvar = self.encode(x.view(-1, 35))
+        mu, logvar = self.encode(x.view(-1, 36))
         z = self.reparameterize(mu, logvar)
         return self.decode(z), mu, logvar, z

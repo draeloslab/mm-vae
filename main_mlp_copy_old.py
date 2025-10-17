@@ -10,7 +10,6 @@ import numpy as np
 import sys
 from simple_mlp import*
 from mlp_data_builder import*
-import pickle 
 
 def load_config(config_name):
     with open(os.path.join(config_name)) as file:
@@ -60,13 +59,9 @@ elif data_type == 'full':
 scaler = StandardScaler()
 y_scaler = StandardScaler()
 train_df.loc[:, latent_columns] = scaler.fit_transform(train_df[latent_columns])
-with open(os.path.join(output_folder, 'scaler.pkl'), 'wb') as file: 
-    pickle.dump(scaler, file)
 #train_df['mouse_ids'].to_csv('/Users/racheliritani/Desktop/AD Project/mm-vae/mouse_ids_2.csv')
 test_df.loc[:, latent_columns] = scaler.transform(test_df[latent_columns])
 train_df.loc[:, label_col] = y_scaler.fit_transform(train_df[[label_col]])
-with open(os.path.join(output_folder, 'y_scaler.pkl'), 'wb') as file: 
-    pickle.dump(y_scaler, file)
 test_df.loc[:, label_col] = y_scaler.transform(test_df[[label_col]])
 #X_train_tensor = torch.tensor(train_df[latent_columns + ['labels']].values, dtype=torch.float32)
 # X_train_tensor = torch.tensor(train_df[latent_columns].values, dtype=torch.float32)
@@ -116,8 +111,6 @@ for epoch in range(epochs):
     
     model.eval()
     test_loss = 0
-    all_outputs = []
-    all_labels = []
     with torch.no_grad():
         for batch_idx, (data, labels) in enumerate(test_loader): 
             data = data.to(device)
@@ -126,40 +119,31 @@ for epoch in range(epochs):
             loss = criterion(output, labels.unsqueeze(1))
             #loss = criterion(output, labels)
             test_loss += loss.item()
-            all_outputs.append(output.cpu())
-            all_labels.append(labels.cpu())
 
-    all_outputs = torch.cat(all_outputs)
-    all_labels = torch.cat(all_labels)
+        if epoch % 10 == 0:
+            #diet_labels = data[:, -1].detach().cpu().numpy()
+            labels = labels.detach().cpu().numpy()
+            output = output.detach().cpu().numpy().squeeze(-1)
 
-    if epoch % 10 == 0:
-        #diet_labels = data[:, -1].detach().cpu().numpy()
-        labels = all_labels.numpy()
-        output = all_outputs.numpy()
-
-        original_scale_labels = y_scaler.inverse_transform(labels.reshape(-1, 1))
-        original_scale_output = y_scaler.inverse_transform(output.reshape(-1, 1))
-        original_scale_labels = original_scale_labels.flatten()
-        original_scale_output = original_scale_output.flatten()
-        out_combined = {
-            #'diet': diet_labels, 
-            f'true_{label_type}': original_scale_labels, 
-            f'predicted_{label_type}': original_scale_output, 
-        }
-        mae = mean_absolute_error(original_scale_labels, original_scale_output)
-        mean_absolute_errors.append({
-            'epoch': epoch, 
-            'mae': mae
-        })
-        if epoch in [10, 50, 100, 1000, 2000, 3000, 4000, 5000, 6000, 7000, 8000, 9000, 10000, 12000, 15000, 20000]:
-            out_combined_df = pd.DataFrame(out_combined)
-            #out_combined_df['mouse_ids'] = test_mouse_ids[-37]
-            out_combined_df['mouse_ids'] = test_mouse_ids.values
-            out_combined_df.to_csv(os.path.join(output_folder, f'predicted_{label_type}_epoch{epoch}.csv'), index=False)
-            print('Predicted values saved')
-
-            torch.save(model, os.path.join(output_folder, f'saved_model_epoch{epoch}.pth'))
-            print('Model saved')
+            original_scale_labels = y_scaler.inverse_transform(labels.reshape(-1, 1))
+            original_scale_output = y_scaler.inverse_transform(output.reshape(-1, 1))
+            original_scale_labels = original_scale_labels.flatten()
+            original_scale_output = original_scale_output.flatten()
+            out_combined = {
+                #'diet': diet_labels, 
+                f'true_{label_type}': original_scale_labels, 
+                f'predicted_{label_type}': original_scale_output, 
+            }
+            mae = mean_absolute_error(original_scale_labels, original_scale_output)
+            mean_absolute_errors.append({
+                'epoch': epoch, 
+                'mae': mae
+            })
+            if epoch in [10, 50, 100, 1000, 2000, 3000, 4000, 5000, 6000, 7000, 8000, 9000, 10000]:
+                out_combined_df = pd.DataFrame(out_combined)
+                out_combined_df['mouse_ids'] = test_mouse_ids[-37]
+                out_combined_df.to_csv(os.path.join(output_folder, f'predicted_{label_type}_epoch{epoch}.csv'), index=False)
+                print('Predicted values saved')
     
     train_losses.append(train_loss / (len(train_loader)))
     test_losses.append(test_loss / len(test_loader))

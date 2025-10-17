@@ -1,14 +1,16 @@
 from torchvision import transforms
 import numpy as np
+import sys
 
 def load_data(df):
-    x = df.iloc[:, 1:-2].values.astype('float32')
-    diet_label = df['Diet_num'].values - 1 
+    x = df.iloc[:, 1:-5].values.astype('float32')
+    #diet_label = df['Diet_num'].values - 1 
+    cfc_label = df['cfc_bin'].values
     mouse_ids = df['MouseID']
     for column in range(x.shape[1]):
         x[:, column] = standardize(x[:, column])
     df_layer1 = x.copy()
-    return x, diet_label, df_layer1, mouse_ids
+    return x, cfc_label, df_layer1, mouse_ids
 
 def standardize(input_array):
     mean = np.nanmean(input_array)
@@ -25,3 +27,12 @@ def set_nans_extreme(df):
     for max_col in max_columns: 
         df[max_col] = df[max_col].fillna(np.max(df[max_col]))
     return df
+
+def load_data_pseudo(df):
+    x = df.iloc[:, 1:-2].values.astype('float32')
+    cfc_label = df['pseudo_label'].values
+    mouse_ids = df['MouseID']
+    for column in range(x.shape[1]):
+        x[:, column] = standardize(x[:, column])
+    df_layer1 = x.copy()
+    return x, cfc_label, df_layer1, mouse_ids

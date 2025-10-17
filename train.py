@@ -38,7 +38,7 @@ def train(epoch, model, train_loader, device, optimizer, log_interval, ks_weight
                 100. * batch_idx / len(train_loader),
                 loss.item() / len(data)))
     
-    if epoch in [200, 500, 1000, 2000, 2500, 3000, 3500, 4000, 4500, 5000, 5500, 6500, 7000, 8000, 10000, 15000, 20000]:
+    if epoch in [10, 200, 500, 1000, 2000, 2500, 3000, 3500, 4000, 4500, 5000, 5500, 6500, 7000, 8000, 10000, 15000, 20000]:
         try:
             with torch.no_grad():
                 test_data, test_labels, df_layer1, mouse_ids = next(iter(test_loader))

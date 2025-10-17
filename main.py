@@ -72,7 +72,8 @@ nature_filtered_nonan = set_nans_extreme(nature_filtered)
 train_set = DataBuilder(nature_filtered_nonan)
 test_set = DataBuilder(nature_filtered_nonan)
 train_loader = DataLoader(train_set, batch_size=batch_size, shuffle=True)
-test_loader = DataLoader(test_set, batch_size=937, shuffle=True)
+#test_loader = DataLoader(test_set, batch_size=937, shuffle=True)
+test_loader = DataLoader(test_set, batch_size=403, shuffle=True)
 
 if model_type == 'VAE' or model_type == 'GMVAE':
     model = VAE().to(device)
@@ -103,10 +104,12 @@ if __name__ == "__main__":
     ax[0].set_xlabel('Epochs')
     ax[0].set_ylabel('Loss')
     ax[0].set_title('Training Loss')
+    ax[0].set_yscale('log')
     ax[0].legend()
 
     ax[1].plot(total_bce_loss, color='red', label='Training MSE loss')
     ax[1].set_title('Training MSE plotted alone')
+    ax[1].set_yscale('log')
 
     plt.suptitle('Training loss for the ' + dataset + ' VAE')
     plt.tight_layout()

@@ -1,5 +1,5 @@
 data: 
-  latent_variable_path: '/Users/racheliritani/Desktop/AD Project/mm-vae/cfc/vanilla_vae_5dim/latent_variables_1000epochs.csv'
+  latent_variable_path: '/Users/racheliritani/Desktop/AD Project/mm-vae/cfc/cgmvae_cfc_cond_5bin_5dim_epoch5000/latent_variables_5000epochs.csv'
   label_type: cfc
   data_type: latent
   cfc_path: '/Users/racheliritani/Desktop/AD Project/VAE-work/c-gmvae/cfc_data_filtered.csv'
@@ -7,8 +7,8 @@ data:
   #cfc_path: '/Users/racheliritani/Desktop/AD Project/VAE-work/c-gmvae/ymaze_distance_data_cleaned.csv'
   #cfc_path: '/Users/racheliritani/Desktop/AD Project/VAE-work/c-gmvae/ymaze_alt_data_cleaned.csv'
 training_params: 
-  epochs: 1000
-  batch_size: 32
+  epochs: 10
+  batch_size: 64
   learning_rate: 0.001
   num_k_folds: 5
 model_params: 
@@ -17,6 +17,6 @@ model_params:
   output_size: 1
   latent_dim: 5
 output: 
-  output_folder: results_DIET/VanillaVAE_5dim/mlp_test
+  output_folder: results_DIET/CGMVAE_cfc_cond_5bins_5dim/mlp_15000/Test
 runtime_config: 
   accelerator: True # True means try to use GPU
