@@ -40,8 +40,6 @@ test_set = DataBuilder(all_data)
 # don't want to shuffle because we want it to be in the same order as the mouseids 
 test_loader = DataLoader(test_set, batch_size=len(test_set))
 
-# model = CGMVAE().to(device)
-# model.load_state_dict(torch.load(model_weights, map_location=device))
 model = torch.load(model_weights, map_location=device)
 model.eval()
 

@@ -7,20 +7,20 @@ from torch.nn import functional as F
 import sys
 
 class CGMVAE(nn.Module):
-    def __init__(self, num_gaussian=5, latent_dim=5):
+    def __init__(self, num_gaussian=5, latent_dim=5, input_dim=36, hidden_dim=16):
         super(CGMVAE, self).__init__()
 
         self.num_gaussian = num_gaussian
         self.latent_dim = latent_dim
         self.label = nn.Embedding(num_gaussian, 1)
 
-        self.fc1 = nn.Linear(36 + 1, 16)
-        self.bn1 = nn.BatchNorm1d(16)
-        self.fc21 = nn.Linear(16, num_gaussian*latent_dim)
-        self.fc22 = nn.Linear(16, num_gaussian*latent_dim)
-        self.fc3 = nn.Linear(latent_dim + 1, 16)
-        self.bn3 = nn.BatchNorm1d(16)
-        self.fc4 = nn.Linear(16, 36)
+        self.fc1 = nn.Linear(input_dim + 1, hidden_dim)
+        self.bn1 = nn.BatchNorm1d(hidden_dim)
+        self.fc21 = nn.Linear(hidden_dim, num_gaussian*latent_dim)
+        self.fc22 = nn.Linear(hidden_dim, num_gaussian*latent_dim)
+        self.fc3 = nn.Linear(latent_dim + 1, hidden_dim)
+        self.bn3 = nn.BatchNorm1d(hidden_dim)
+        self.fc4 = nn.Linear(hidden_dim, input_dim)
 
     def encode(self, x, y):
         # adding the following lines for the conditional layer 

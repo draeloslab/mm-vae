@@ -2,7 +2,6 @@ import torch
 import numpy as np
 from itertools import combinations
 import sys
-#from sobol_seq import i4_sobol_generate_std_normal
 
 def draw_gmm_samples(num_samples, gmm_centers, gmm_std):
     num_gmm_centers, dimension = gmm_centers.shape

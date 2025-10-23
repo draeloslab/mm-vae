@@ -1,7 +1,7 @@
 import os 
 import yaml 
 import pandas as pd
-from torch.utils.data import TensorDataset, DataLoader, random_split, SubsetRandomSampler
+from torch.utils.data import DataLoader, random_split
 import matplotlib.pyplot as plt
 from sklearn.model_selection import KFold, train_test_split
 from sklearn.preprocessing import StandardScaler
@@ -18,14 +18,13 @@ def load_config(config_name):
     return config
 
 config = load_config("config_mlp.yaml") 
-#torch.set_flush_denormal(True)
 
 epochs = config['training_params']['epochs']
 learning_rate = config['training_params']['learning_rate']
 batch_size = config['training_params']['batch_size']
 num_k_folds = config['training_params']['num_k_folds']
 data_path = config['data']['latent_variable_path']
-cfc_path = config['data']['cfc_path']
+path = config['data']['path']
 label_type = config['data']['label_type']
 data_type = config['data']['data_type']
 
@@ -39,11 +38,11 @@ os.makedirs(output_folder, exist_ok=True)
 accelerator = config['runtime_config']['accelerator']
 
 data_df = pd.read_csv(data_path)
-cfc_df = pd.read_csv(cfc_path)
+df = pd.read_csv(path)
 if data_type == 'latent':
-    dataset = pd.merge(data_df, cfc_df, left_on='mouse_ids', right_on='Mouse.ID')
+    dataset = pd.merge(data_df, df, left_on='mouse_ids', right_on='Mouse.ID')
 elif data_type == 'full':
-    dataset = pd.merge(data_df, cfc_df, left_on='MouseID', right_on='Mouse.ID')
+    dataset = pd.merge(data_df, df, left_on='MouseID', right_on='Mouse.ID')
 if label_type == 'cfc': 
     label_col = 'CFC.24mo.Average'
 elif label_type == 'ymaze_distance':
@@ -104,7 +103,6 @@ for epoch in range(epochs):
         labels = labels.to(device)
         output = model(data)
         loss = criterion(output, labels.unsqueeze(1))
-        #loss = criterion(output, labels)
 
         optimizer.zero_grad()
         loss.backward()
@@ -124,12 +122,11 @@ for epoch in range(epochs):
             labels = labels.to(device)
             output = model(data)
             loss = criterion(output, labels.unsqueeze(1))
-            #loss = criterion(output, labels)
             test_loss += loss.item()
             all_outputs.append(output.cpu())
             all_labels.append(labels.cpu())
 
-    all_outputs = torch.cat(all_outputs)
+    all_outputs = torch.cat(alcfl_outputs)
     all_labels = torch.cat(all_labels)
 
     if epoch % 10 == 0:
@@ -182,102 +179,3 @@ ax[2].plot(total_error['epoch'], total_error['mae'], label='test', color='orange
 ax[2].set_title('Mean absolute error')
 ax[2].legend()
 plt.savefig(os.path.join(output_folder, str(label_type) + '_train_and_test_loss.png'))
-
-# kfold = KFold(n_splits=num_k_folds, shuffle=True, random_state=42)
-# fold_loss_results = {}
-# fold_predictions = {}
-
-# for fold, (train_ids, val_ids) in enumerate(kfold.split(train_dataset)):
-#     print(f'fold {fold + 1}')
-
-#     train_sampler = SubsetRandomSampler(train_ids)
-#     val_sampler = SubsetRandomSampler(val_ids)
-
-#     train_loader = DataLoader(train_dataset, batch_size=batch_size, sampler=train_sampler)
-#     val_loader = DataLoader(train_dataset, batch_size, sampler=val_sampler)
-
-#     model = simple_mlp().to(device)
-#     criterion = nn.MSELoss(reduction='mean')
-#     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
-
-#     train_losses = []
-#     val_losses = []
-#     for epoch in range(epochs):
-#         train_loss = 0
-#         for batch_idx, (data, labels) in enumerate(train_loader): 
-#             data = data.to(device)
-#             labels = labels.to(device)
-#             output = model(data)
-#             loss = criterion(output, labels.unsqueeze(1))
-
-#             optimizer.zero_grad()
-#             loss.backward()
-#             optimizer.step()
-#             train_loss += loss.item()
-
-#         if (epoch + 1) % 1 == 0:
-#             print(f'Epoch [{epoch+1}/{epochs}], Loss: {train_loss / len(train_loader):.4f}')
-
-#         val_loss = 0
-#         with torch.no_grad(): 
-#             for batch_idx, (data, labels) in enumerate(val_loader): 
-#                 data = data.to(device)
-#                 labels = labels.to(device)
-#                 output = model(data)
-#                 loss = criterion(output, labels.unsqueeze(1))
-            
-#                 val_loss += loss.item()
-#         train_losses.append(train_loss / len(train_loader))
-#         val_losses.append(val_loss / len(test_loader))
-    
-#     fold_loss_results[fold] = {'train': train_losses, 'val': val_losses}
-
-#     diets = []
-#     predictions = []
-#     true_labels = []
-#     with torch.no_grad():
-#         for batch_idx, (data, labels) in enumerate(val_loader):
-#             data = data.to(device)
-#             labels = labels.to(device)
-#             preds = model(data)
-
-#             diets.extend(data[:, -1].cpu().numpy().flatten())
-#             predictions.extend(preds.cpu().numpy().flatten())
-#             true_labels.extend(labels.cpu().numpy().flatten())
-
-#     fold_predictions[fold] = {'diets': diets, 'predictions': predictions, 'true_labels': true_labels}
-#     #fold_predictions[fold] = {'predictions': predictions}
-
-# all_preds = []
-# for fold_number, results in fold_predictions.items():
-#     for diet, prediction, true in zip(results['diets'], results['predictions'], results['true_labels']):
-#     #for prediction in results['predictions']:
-#         all_preds.append({ 
-#             'fold': fold_number,
-#             'diet': diet,
-#             'predicted_label': prediction,
-#             'true_label': true
-#         })
-# fold_predictions_df = pd.DataFrame(all_preds, columns=['fold', 'diet', 'predicted_label', 'true_label'])
-# fold_predictions_df.to_csv(os.path.join(output_folder, 'val_' + str(label_type) + '_predictions.csv'), index=False)
-
-# fig, ax = plt.subplots(1, 2, figsize=(12, 5))
-# #for fold in range(num_k_folds):
-# for fold in range(5):
-#     colors = ['blue', 'red', 'green', 'yellow', 'pink']
-#     ax[0].plot(fold_loss_results[fold]['train'], color=colors[fold], label='train')
-#     ax[0].set_title('Training loss')
-#     ax[0].set_yscale('log')
-#     ax[1].plot(fold_loss_results[fold]['val'], color=colors[fold], label='test')
-#     ax[1].set_title('Validation loss')
-#     ax[1].set_yscale('log')
-# plt.suptitle('Training and validation loss for ' + str(label_type) + ' prediction with Tanh')
-# plt.savefig(os.path.join(output_folder, str(label_type) + '_train_and_test_loss.png'))
-
-# # for batch_idx, (data, labels) in enumerate(train_loader): 
-# #     print(batch_idx, data.shape, labels.shape)
-
-# # new_data = torch.randn(1, input_size)
-# # with torch.no_grad(): # Disable gradient calculation for inference
-# #     prediction = model(new_data)
-# # print(f"Prediction for new data: {prediction.item():.4f}")

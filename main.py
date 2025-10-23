@@ -4,7 +4,6 @@ import torch
 import torch.utils.data 
 from torch import optim
 from torch.utils.data import DataLoader
-from torchvision import datasets, transforms
 from torchvision.utils import save_image
 import os
 import matplotlib.pyplot as plt 
@@ -35,25 +34,32 @@ torch.cuda.manual_seed(random_seed)
 
 model_type = config['model']['type']
 latent_dim = config['model']['latent_dim']
+
 dataset = config['data']['dataset']
 data_path = config['data']['data_path']
-epochs = config['training_params']['epochs']
-batch_size = config['training_params']['batch_size']
-log_interval = config['training_params']['log_interval']
+
 output_folder =  config['output']['output_folder']
 os.makedirs(output_folder, exist_ok=True)
-accelerator = config['runtime_config']['accelerator']
+
+epochs = config['training_params']['epochs']
+num_samples = config['training_params']['num_samples']
+batch_size = config['training_params']['batch_size']
+log_interval = config['training_params']['log_interval']
 df_gmm = pd.read_csv(config['training_params']['gmm_centers'])
 learning_rate = config['training_params']['learning_rate']
 gmm_centers = torch.tensor([df_gmm[col].values for col in df_gmm.columns]).float()
 gmm_centers = gmm_centers[1:]
 gmm_std = config['training_params']['gmm_std']
-ks_weight, cv_weight, samples, components = estimate_loss_coefficients(batch_size, gmm_centers, gmm_std, num_samples=128)
+ks_weight, cv_weight, samples, components = estimate_loss_coefficients(batch_size, gmm_centers, gmm_std, num_samples)
+# this part just saves the samples (and the gaussian component they belong to) that were generated to calculate the ks and cv weight
 components = np.array(components)
 components = components[:, np.newaxis]
 final_columns = [f'Dim{i+1}' for i in range(latent_dim)] + ['Component']
 priors = pd.DataFrame(np.concatenate((samples.numpy(), components), axis=1), columns=final_columns)
 priors.to_csv(os.path.join(output_folder, 'prior_distribution.csv'), index=False)
+
+accelerator = config['runtime_config']['accelerator']
+
 data_loss_weight = [config['loss_params']['data_loss_weight']]
 kl_weight = config['loss_params']['kl_weight']
 
@@ -72,8 +78,7 @@ nature_filtered_nonan = set_nans_extreme(nature_filtered)
 train_set = DataBuilder(nature_filtered_nonan)
 test_set = DataBuilder(nature_filtered_nonan)
 train_loader = DataLoader(train_set, batch_size=batch_size, shuffle=True)
-#test_loader = DataLoader(test_set, batch_size=937, shuffle=True)
-test_loader = DataLoader(test_set, batch_size=403, shuffle=True)
+test_loader = DataLoader(test_set, batch_size=len(test_set), shuffle=True)
 
 if model_type == 'VAE' or model_type == 'GMVAE':
     model = VAE().to(device)

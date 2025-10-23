@@ -5,14 +5,14 @@ from torch.nn import functional as F
 import sys
 
 class VAE(nn.Module):
-    def __init__(self):
+    def __init__(self, input_dim=36, hidden_dim=16, latent_dim=2):
         super(VAE, self).__init__()
 
-        self.fc1 = nn.Linear(36, 16)
-        self.fc21 = nn.Linear(16, 2)
-        self.fc22 = nn.Linear(16, 2)
-        self.fc3 = nn.Linear(2, 16)
-        self.fc4 = nn.Linear(16, 36)
+        self.fc1 = nn.Linear(input_dim, hidden_dim)
+        self.fc21 = nn.Linear(hidden_dim, latent_dim)
+        self.fc22 = nn.Linear(hidden_dim, latent_dim)
+        self.fc3 = nn.Linear(latent_dim, hidden_dim)
+        self.fc4 = nn.Linear(hidden_dim, input_dim)
 
     def encode(self, x):
         h1 = F.tanh(self.fc1(x))
