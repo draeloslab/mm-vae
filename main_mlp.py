@@ -70,6 +70,8 @@ test_df.loc[:, label_col] = y_scaler.transform(test_df[[label_col]])
 #X_train_tensor = torch.tensor(train_df[latent_columns + ['labels']].values, dtype=torch.float32)
 # X_train_tensor = torch.tensor(train_df[latent_columns].values, dtype=torch.float32)
 # y_train_tensor = torch.tensor(train_df[label_col].values, dtype=torch.float32)
+test_df.to_csv('/Users/racheliritani/Desktop/AD Project/mm-vae/cfc_pred/shap_analysis/test_df.csv', index=False)
+train_df.to_csv('/Users/racheliritani/Desktop/AD Project/mm-vae/cfc_pred/shap_analysis/train_df.csv', index=False)
 train_dataset = MLPDataBuilder(train_df, latent_columns, label_col)
 train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
 #X_test_tensor = torch.tensor(test_df[latent_columns + ['labels']].values, dtype=torch.float32)
@@ -126,7 +128,7 @@ for epoch in range(epochs):
             all_outputs.append(output.cpu())
             all_labels.append(labels.cpu())
 
-    all_outputs = torch.cat(alcfl_outputs)
+    all_outputs = torch.cat(all_outputs)
     all_labels = torch.cat(all_labels)
 
     if epoch % 10 == 0:

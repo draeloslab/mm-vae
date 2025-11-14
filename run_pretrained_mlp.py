@@ -7,7 +7,7 @@ from data_builder_no_labels import MLPDataBuilder
 
 model_weights = '/Users/racheliritani/Desktop/AD Project/mm-vae/results_DIET/CGMVAE_cfc_cond_5bins_5dim/mlp_15000/saved_model_epoch15000.pth'
 data_path = '/Users/racheliritani/Desktop/AD Project/mm-vae/cfc/no_cfc_latent_space/latent_variables_5000epochs.csv'
-output_path = '/Users/racheliritani/Desktop/AD Project/mm-vae/cfc_pred'
+output_path = '/Users/racheliritani/Desktop/AD Project/mm-vae/cfc_pred/test'
 
 os.makedirs(output_path, exist_ok=True)
 
@@ -31,6 +31,7 @@ with open('/Users/racheliritani/Desktop/AD Project/mm-vae/results_DIET/CGMVAE_cf
     loaded_y_scaler = pickle.load(file)
 
 data_no_cfc_lv.loc[:, latent_columns] = loaded_scaler.transform(data_no_cfc_lv.loc[:, latent_columns])
+data_no_cfc_lv[latent_columns].to_csv('/Users/racheliritani/Desktop/AD Project/mm-vae/cfc_pred/shap_analysis/unlabeled_test_df.csv', index=False)
 df = MLPDataBuilder(data_no_cfc_lv, latent_columns)
 data_loader = DataLoader(df, batch_size = len(df), shuffle=False)
 
