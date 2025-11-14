@@ -30,10 +30,12 @@ log_interval = config['training_params']['log_interval']
 output_folder =  config['output']['output_folder']
 accelerator = config['runtime_config']['accelerator']
 
-if accelerator :
-    device = torch.device("mps")
-else:
-    device = torch.device("cpu")
+# if accelerator :
+#     device = torch.device("cuda")
+# else:
+#     device = torch.device("cpu")
+
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 print(f"Using device: {device}")
 
