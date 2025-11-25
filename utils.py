@@ -8,7 +8,8 @@ def unnormalize(x, mean, std):
         new_mean = [-m/s for m, s in zip(mean, std)]
         new_std = [1/s for s in std]
     unnorm = transforms.Normalize(new_mean, new_std)
-    return unnorm(x) * 255
+    #return unnorm(x) * 255
+    return unnorm(x)
 
 # def unnormalize(x, mean, std):
 #     if (isinstance(mean, float)):

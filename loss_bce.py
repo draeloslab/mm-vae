@@ -2,7 +2,7 @@
 import torch
 from torch.nn import functional as F
 
-def loss_function_bce(recon_x, x, mu, logvar):
+def loss_function_bce(recon_x, x, mu, logvar, beta):
     if x.shape[-1] == 28:
         BCE = F.binary_cross_entropy(recon_x, x.view(-1, 784), reduction='sum')
     else:
@@ -14,4 +14,4 @@ def loss_function_bce(recon_x, x, mu, logvar):
     # 0.5 * sum(1 + log(sigma^2) - mu^2 - sigma^2)
     KLD = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp())
 
-    return BCE + KLD, BCE, KLD
+    return BCE + beta * KLD, BCE, KLD

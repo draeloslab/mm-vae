@@ -2,7 +2,7 @@
 import torch
 from torch.nn import functional as F
 
-def loss_function(recon_x, x, mu, logvar, beta):
+def loss_function_mse(recon_x, x, mu, logvar, beta):
     if x.shape[-1] == 28:
         MSE = F.mse_loss(recon_x, x.view(-1, 784), reduction='sum')
     else:
