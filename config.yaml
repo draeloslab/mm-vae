@@ -1,0 +1,15 @@
+model: 
+  type: VanillaVAE
+data: 
+  random_seed: 1
+model_params: 
+  latent_dim: 64
+training_params: 
+  epochs: 2000
+  batch_size: 256
+  log_interval: 10 # number of batches to wait until logging the training status 
+  learning_rate: 0.0001
+output: 
+  output_folder: results/VanillaVAE
+runtime_config: 
+  accelerator: True # True means try to use GPU
