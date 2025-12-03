@@ -2,8 +2,9 @@
 import torch
 from torch.nn import functional as F
 
-def loss_function(recon_x, x, mu, logvar, beta = 0.0001):
+def loss_function(recon_x, x, mu, logvar, beta = 0.01):
     # BCE = F.binary_cross_entropy(recon_x, x.view(-1, 784), reduction='sum')
+    #MSE = F.mse_loss(recon_x, x.view(-1, 20068), reduction='sum')
     MSE = F.mse_loss(recon_x, x.view(-1, 5017), reduction='sum')
 
     # see Appendix B from VAE paper:

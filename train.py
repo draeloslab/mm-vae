@@ -7,7 +7,7 @@ import pandas as pd
 import os
 from loss import*
 
-def train(epoch, model, train_loader, device, optimizer, log_interval, test_loader, latent_dim, output_folder):
+def train(epoch, model, train_loader, device, optimizer, log_interval, test_loader, latent_dim, output_folder, beta):
     model.train()
     train_loss = 0
     recon_loss = 0
@@ -18,7 +18,7 @@ def train(epoch, model, train_loader, device, optimizer, log_interval, test_load
         #genotype = genotype.to(device)
         optimizer.zero_grad()
         recon_batch, mu, logvar, z = model(data)
-        loss, recons, kld = loss_function(recon_batch, data, mu, logvar)
+        loss, recons, kld = loss_function(recon_batch, data, mu, logvar, beta)
         loss.backward()
         train_loss += loss.item()
         # recon_loss += recons.item() * len(data)
@@ -58,6 +58,8 @@ def train(epoch, model, train_loader, device, optimizer, log_interval, test_load
                 mu.to_csv(os.path.join(output_folder, f'mu_epoch{epoch}.csv'), index=False)
 
                 recons = pd.DataFrame(recons.detach().cpu().numpy())
+                recons['flyID'] = list(test_flyids)
+                recons['genotype'] = list(test_genotype)
                 recons.to_csv(os.path.join(output_folder, f'recons_epoch{epoch}.csv'), index=False)
 
                 torch.save(model, os.path.join(output_folder, f'saved_model_epoch{epoch}.pth'))
