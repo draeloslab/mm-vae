@@ -1,0 +1,23 @@
+# initialize parameters 
+data_path = '/home/rachel/Desktop/mm-vae_ext2/data/raw_beam_break_standardized_binned_dropna.csv'
+output_path = '/home/rachel/Desktop/drosophila_sleep_analysis'
+config_output = os.path.join(output_path, 'config.txt')
+
+# model parameters
+latent_dim = 128
+gmm_centers_path = '/home/rachel/Desktop/mm-vae_ext2/data/gmm_centers_ld128_std15.csv'
+gmm_std = 2
+num_gaussian = 2
+input_dim = 5017
+hidden_dim = 2048
+
+# training parameters
+batch_size = 256
+epochs = 10
+learning_rate = 0.001
+num_samples = 256 # should be less than or equal to batch size 
+log_interval = 10
+kl_weight = 1
+
+# random
+random_seed = 10
