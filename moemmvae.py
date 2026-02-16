@@ -1,29 +1,27 @@
 # this file will have the model architecture for the MoE mmVAE model 
 # from __future__ import print_function
 import torch.distributions as dist
-from vae_mnist import*
-from vae_svhn import*
+from vae import*
 from utils import*
 from torchvision.utils import save_image
+import torch.nn.functional as F
 import math
 
 class MMVAE(nn.Module):
-    def __init__(self, latent_dim, mnist_scale, svhn_scale, learn_prior: bool = False):
+    def __init__(self, input_dim1, input_dim2, H1_1, H2_1, H3_1, H1_2, H2_2, H3_2, latent_dim, scale1, scale2, learn_prior: bool = False):
         super(MMVAE, self).__init__()
-
-        #self.mnistvae = VAE_MNIST(**mnistvae_params)
-        #self.svhnvae = VAE_SVHN(**svhnvae_params)
+        
         ## add parameter initializations in main class
-        self.mnistvae = VAE_MNIST(latent_dim, mnist_scale)
-        self.svhnvae = VAE_SVHN(latent_dim, svhn_scale)
-        self.vaes = nn.ModuleList([self.mnistvae, self.svhnvae])
-        self.scaling = [mnist_scale, svhn_scale]
+        self.vae1 = VAE(input_dim1, H1_1, H2_1, H3_1, latent_dim, scale1)
+        self.vae2 = VAE(input_dim2, H1_2, H2_2, H3_2, latent_dim, scale2)
+        self.vaes = nn.ModuleList([self.vae1, self.vae2])
+        self.scaling = [scale1, scale2]
         self.M = len(self.vaes)
         self.latent_dim = latent_dim
 
         # add scaling factors for calculating combined loss across the two modalities 
-        self.mnistvae.like_scale = mnist_scale
-        self.svhnvae.like_scale = svhn_scale
+        self.vae1.like_scale = scale1
+        self.vae2.like_scale = scale2
 
         # initializing learned prior
         # dictionary object to determine if prior will be learned or not.
@@ -44,18 +42,22 @@ class MMVAE(nn.Module):
     @property
     def pz(self): 
         mu, scale = self.pz_params
-        return dist.Laplace(mu, scale)
+        #return dist.Laplace(mu, scale)
+        return dist.Normal(mu, scale)
 
     # define the fixed shared prior (laplace distribution with mean 0 and std 1), dimensions equal to the number of latent dimensions
+    # changed to defining the prior as a normal distribution
     def get_pz(self):
         # finds the device that the vae parameters are on 
-        device = next(self.mnistvae.parameters()).device
+        device = next(self.vae1.parameters()).device
         # creates the mu and sigma tensors on that device
         mu = torch.zeros(1, self.latent_dim, device=device)
         sigma = torch.ones(1, self.latent_dim, device=device)
 
         # laplace prior for now because that is what was used in the paper
-        return dist.Laplace(mu, sigma)
+        #return dist.Laplace(mu, sigma)
+        # change to normal prior for testing 
+        return dist.Normal(mu, sigma)
     
     def forward(self, x, num_samples):
         # forward pass through joint encoder distributions 
@@ -126,165 +128,181 @@ class MMVAE(nn.Module):
         lw_all = torch.cat(log_iws, dim=0)
         # total ELBO is averaged log weights across m modalities 
         avg_log_weight = lw_all.mean(dim=0).sum()
-        return -avg_log_weight
+        return avg_log_weight
     
     # computes IWAE loss (very similar to ELBO but with K>1 samples)
-    def moe_iwae_loss(self, x_data, K=1):
+    def moe_iwae_loss(self, x_data, beta, K=1):
         #pz = self.get_pz()
         mu, scale = self.pz_params
-        pz  = dist.Laplace(mu, scale)
+        #pz  = dist.Laplace(mu, scale)
+        pz = dist.Normal(mu, scale)
         qz_xs, zss, px_zs = self.forward(x_data, num_samples=K)
+        # print('qz_xs: ' + str(len(qz_xs)))
+        # print('qz_xs: ' + str(qz_xs[0].shape))
+        # print('zss: ' + str(len(zss)))
+        # print('zss: ' + str(zss[0].shape))
+        # print('px_zs: ' + str(len(px_zs)))
+        # print('px_zs: ' + str(px_zs).shape)
 
         log_iws = [] # stores importance weights 
-
+        kls = []
+        lpx_zs = []
+        lpxz_ind = []
+        
         for encoder in range(self.M):
+            #print('encoder ' + str(encoder))
             z_r = zss[encoder]
             K, B = zss[encoder].shape[:2]
+            #print('B ' + str(B))
             '''
             There are four terms that comprise the ELBO loss calculation below. These four terms are the log-prior term (lpz), the MoE log-posterior term (lqz_x),
             the joint scaled log-likelihood term (lpx_z) and the log importance weights terms (log_iw) 
             '''
             # log prior term
             lpz = pz.log_prob(z_r).sum(-1) 
+            #print('log prior lpz: ' + str(lpz.shape))
             # calculate the log posterior term averaged over all modalities
             lqz_x = log_mean_exp(torch.stack([qz_x.log_prob(z_r).sum(-1) for qz_x in qz_xs]), dim=0)
+            #print('log posterior averaged over modalities lqz_x: ' + str(lqz_x.shape))
             # joint scaled log likelihood term
             lpx_all = [] 
             for m in range(self.M):
-                # maybe should be changed to be more robust
-                batch_length = x_data[m].shape[0]
-                if m == 0 and encoder == 0: 
-                    x_data[m] = x_data[m].reshape(1, batch_length, -1)
+                #print('Modality ' + str(m))
                 log_prob = px_zs[encoder][m].log_prob(x_data[m])
+                #print('log_prob ' + str(log_prob.shape))
                 # scale 
-                #log_prob_scaled = log_prob.view(*log_prob.shape[:2], -1).sum(-1) * self.vaes[m].like_scale
                 scale = self.vaes[m].like_scale
                 log_prob_scaled = log_prob.reshape(K*B, -1).sum(dim=1).reshape(K, B) * scale
+                #print('log prob scaled ' + str(log_prob_scaled.shape))
+                #print(log_prob_scaled.shape)
                 lpx_all.append(log_prob_scaled)
+                lpxz_ind.append(-1*log_prob_scaled.mean().detach().cpu().numpy())
             lpx_z = torch.stack(lpx_all).sum(0)
+            #print('lpx_z ' + str(lpx_z.shape))
             # log importance weight
-            lw = lpz + lpx_z - lqz_x
+            lw = lpx_z + ((lpz - lqz_x) * beta)
+            #lw = lpz + lpx_z - lqz_x
+            #print('lw: ' + str(lw.shape))
             #print(lpz.shape, lpx_z.shape, lqz_x.shape)
             log_iws.append(lw)
+            lpx_zs.append(-1*lpx_z.mean().detach().cpu().numpy())
+            kls.append((lqz_x - lpz).mean().detach().cpu().numpy())
         lw_all = torch.cat(log_iws, dim=0)
+        #print('lw_all ' + str(lw_all.shape))
         # total ELBO is averaged log weights across m modalities 
-        # modify this portion to accept K values greater than 1
         lw_all_reshape = lw_all.view(self.M, K, -1) # transform from (M*K, B) to (M, K, B)
-        log_p_x = log_mean_exp(lw_all_reshape)
+        #print('lw_all_reshape ' + str(lw_all_reshape.shape))
+        log_p_x = log_mean_exp(lw_all_reshape, dim=1)
+        #print('log_p_x ' + str(log_p_x.shape))
         avg_log_weight = log_p_x.sum(dim=0).mean()
-        return -avg_log_weight
+        return avg_log_weight, lpx_zs, kls, lpxz_ind
 
-    # The following functions are for visualizing the reconstructed data
-    def decode_from_z(self, z):
-        all_means = []
-        for vae in self.vaes:
-            mean = vae.decode(z)[0].detach()
-            all_means.append(mean)
-        return all_means
+    # computes DReG loss (stabler version of IWAE to improve unstable/large gradients in the encoder)
+    def moe_dreg_loss(self, x_data, K=1):
+        #pz = self.get_pz()
+        mu, scale = self.pz_params
+        #pz  = dist.Laplace(mu, scale)
+        pz = dist.Normal(mu, scale)
+        qz_xs, zss, px_zs = self.forward(x_data, num_samples=K)
+        # print('qz_xs: ' + str(len(qz_xs)))
+        # print('zss: ' + str(len(zss)))
+        # print('px_zs: ' + str(len(px_zs)))
 
-    def generate(self, output_path, epoch):
-        # Generates samples (N = num samples) from the prior and decodes them for both modalities 
-        N = 64 
-        zs  = self.pz.rsample(torch.Size([N])).squeeze(1)
-        decoded_samples = self.decode_from_z(zs)
-        for i, samples in enumerate(decoded_samples):
-            samples = samples.data.cpu().view(N, *samples.size()[1:])
-            save_image(samples, '{}/random_generations_{}_{}.png'.format(output_path, i, epoch), nrow=int(math.sqrt(N)))
+        qz_xs_ = [vae.qz_x(*[dist.detach() for dist in vae.qz_x_params]) for vae in self.vaes] # add for DReG estimate 
 
-    def reconstruct(self, data, output_path, epoch):
-        # Computes reconstructions for the first N samples
-        N = 10 
+        log_iws = [] # stores importance weights 
+        lpzs = []
+        lpx_zs = []
+        lqz_xs = []
+        
+        for encoder in range(self.M):
+            #print('encoder ' + str(encoder))
+            z_r = zss[encoder]
+            K, B = zss[encoder].shape[:2]
+            #print('B ' + str(B))
+            '''
+            There are four terms that comprise the ELBO loss calculation below. These four terms are the log-prior term (lpz), the MoE log-posterior term (lqz_x),
+            the joint scaled log-likelihood term (lpx_z) and the log importance weights terms (log_iw) 
+            '''
+            # log prior term
+            lpz = pz.log_prob(z_r).sum(-1) 
+            #print('log prior lpz: ' + str(lpz.shape))
+            # calculate the log posterior term averaged over all modalities
+            lqz_x = log_mean_exp(torch.stack([qz_x.log_prob(z_r).sum(-1) for qz_x in qz_xs]), dim=0)
+            #print('log posterior averaged over modalities lqz_x: ' + str(lqz_x.shape))
+            # joint scaled log likelihood term
+            lpx_all = [] 
+            for m in range(self.M):
+                #print('Modality ' + str(m))
+                log_prob = px_zs[encoder][m].log_prob(x_data[m])
+                #print('log_prob ' + str(log_prob.shape))
+                # scale 
+                scale = self.vaes[m].like_scale
+                log_prob_scaled = log_prob.reshape(K*B, -1).sum(dim=1).reshape(K, B) * scale
+                #print('log prob scaled ' + str(log_prob_scaled.shape))
+                lpx_all.append(log_prob_scaled)
+            lpx_z = torch.stack(lpx_all).sum(0)
+            #print('lpx_z ' + str(lpx_z.shape))
+            # log importance weight
+            lw = lpz + lpx_z - lqz_x
+            #print('lw: ' + str(lw.shape))
+            #print(lpz.shape, lpx_z.shape, lqz_x.shape)
+            log_iws.append(lw)
+            lpzs.append(-1*log_mean_exp(lpz, dim=0).mean().detach().cpu().numpy())
+            lpx_zs.append(-1*log_mean_exp(lpx_z, dim=0).mean().detach().cpu().numpy())
+            lqz_xs.append(-1*log_mean_exp(lqz_x, dim=0).mean().detach().cpu().numpy())
+        lw_all = torch.cat(log_iws, dim=0)
+        #print('lw_all ' + str(lw_all.shape))
+        # total ELBO is averaged log weights across m modalities 
+        lw_all_reshape = lw_all.view(self.M, K, -1) # transform from (M*K, B) to (M, K, B)
+        #print('lw_all_reshape ' + str(lw_all_reshape.shape))
+        zss = torch.cat(zss, dim=0)
+        with torch.no_grad():
+            grad_wt = (lw_all_reshape - torch.logsumexp(lw_all_reshape, 0, keepdim=True)).exp()
+            if zss.requires_grad: 
+                zss.register_hook(lambda grad: grad_wt.unsqueeze(-1) * grad)
+        return (grad_wt * lw).mean(0).sum(), lpzs, lpx_zs, lqz_xs
 
+    def reconstruct(self, data, output_path, epoch, dataset_abbrev):
         device = next(self.parameters()).device
-        x_mnist_full = data[0].to(device)
-        x_svhn_full = data[1].to(device)
-        x_mnist_full = x_mnist_full.squeeze()
-        x_mnist_sub = x_mnist_full[:N]
-        x_svhn_sub = x_svhn_full[:N]
-        svhn_size = x_svhn_sub.size()[1:]
-        input_samples = [x_mnist_sub, x_svhn_sub]
+        x1 = data[0][0].to(device)
+        x2 = data[1][0].to(device)
+        x1_labels = data[0][1].to(device)
+        x2_labels = data[1][1].to(device)
+        x1_meta = data[0][2]
+        x2_meta = data[0][2]
+        input_data = [x1, x2]
+        reconstruction_loss = {}
+        mse_loss = {}
         for i, vae in enumerate(self.vaes):
-            input_sample = input_samples[i]
-            mu, logvar = vae.encode(input_sample)
-            scale = torch.exp(logvar)
-            qz = vae.qz_x(mu, scale)
-            z = qz.rsample().unsqueeze(0)
+            mu, logvar = vae.encode(input_data[i])
+            qz = vae.qz_x(mu, torch.exp(logvar))
+            z = qz.rsample(torch.Size([1]))
+            latent_vectors = z.squeeze().detach().cpu().numpy()
+            latent_space = pd.DataFrame(latent_vectors, columns=[f'LV{i+1}' for i in range(latent_vectors.shape[1])])
+            if 'HC' in dataset_abbrev:
+                latent_space = latent_space.assign(**data[i][2])
+            else:
+                latent_space['Diet'] =  data[i][2] # for DO
+                latent_space['MouseID'] = data[i][3] # for DO
+            latent_space['encoder'] = np.repeat(dataset_abbrev[i], latent_space.shape[0])
+            latent_space.to_csv(os.path.join(output_path, f'latent_variables_epoch{epoch}_vae{dataset_abbrev[i]}.csv'), index=False)
+            print(f'Encoded features from {dataset_abbrev[i]} encoder saved')
             for o, vae_out in enumerate(self.vaes): 
-                params = vae_out.decode(z)
-                recon = params[0].squeeze(0).cpu()
-                in_data = input_sample.cpu()
-                in_data = in_data.squeeze()
-                if in_data.size()[1:] != svhn_size:
-                    in_data = resize_img(in_data, svhn_size)
-                if recon.size()[1:] != svhn_size:
-                    recon = resize_img(recon, svhn_size)
-                pair = torch.cat([in_data, recon], dim=-1)
-                save_image(pair, '{}/recon_{}x{}_{:03d}.png'.format(output_path, i, o, epoch))
-
-    @torch.no_grad()
-    def get_latent_space(self, x_data, encoder=0):
-        vae = self.vaes[encoder]
-        input_data = x_data[encoder]
-
-        if encoder == 0:
-            B = input_data.size(0)
-            input_data = input_data.view(B, -1)
-
-        mu, logvar = vae.encode(input_data)
-
-        return mu
-    
-# loss functions from paper to test 
-
-    def _m_iwae(self, x, K=1):
-        """IWAE estimate for log p_\theta(x) for multi-modal vae -- fully vectorised"""
-        qz_xs, zss, px_zs = self.forward(x, num_samples=1)
-        lws = []
-        for r, qz_x in enumerate(qz_xs):
-            mu, scale = self.pz_params
-            pz_dist  = dist.Laplace(mu, scale)
-            lpz = pz_dist.log_prob(zss[r]).sum(-1)
-            lqz_x = log_mean_exp(torch.stack([qz_x.log_prob(zss[r]).sum(-1) for qz_x in qz_xs]))
-
-            lpx_z = [px_z.log_prob(x[d]).view(*px_z.batch_shape[:2], -1)
-                        .mul(self.scaling[d]).sum(-1)
-                    for d, px_z in enumerate(px_zs[r])]
-            lpx_z = torch.stack(lpx_z).sum(0)
-            lw = lpz + lpx_z - lqz_x
-            lws.append(lw)
-            lws_all = torch.cat(lws)
-
-        return log_mean_exp(lws_all).sum()
-
-# m_dreg is actually the loss function they ended up using for the final MNIST/SVHN results I believe 
-
-    def _m_dreg_looser(self, x, K=1):
-        """DERG estimate for log p_\theta(x) for multi-modal vae -- fully vectorised
-        This version is the looser bound---with the average over modalities outside the log
-        """
-        qz_xs, zss, px_zs = self.forward(x, num_samples=KeyboardInterrupt)
-        qz_xs_ = [vae.qz_x(*[p.detach() for p in vae.qz_x_params]) for vae in model.vaes]
-        lws = []
-        for r, vae in enumerate(self.vaes):
-            lpz = model.pz(*model.pz_params).log_prob(zss[r]).sum(-1)
-            lqz_x = log_mean_exp(torch.stack([qz_x_.log_prob(zss[r]).sum(-1) for qz_x_ in qz_xs_]))
-            lpx_z = [px_z.log_prob(x[d]).view(*px_z.batch_shape[:2], -1)
-                        .mul(model.vaes[d].llik_scaling).sum(-1)
-                    for d, px_z in enumerate(px_zs[r])]
-            lpx_z = torch.stack(lpx_z).sum(0)
-            lw = lpz + lpx_z - lqz_x
-            lws.append(lw)
-        return torch.stack(lws), torch.stack(zss)
-
-
-
-
-
-        
-            
-
-
-            
-        
-
+                mean, scale = vae_out.decode(z)
+                px_z = vae_out.px_z(mean, scale)
+                log_likelihood = px_z.log_prob(input_data[o]).sum(dim=-1).mean()
+                reconstruction_loss[f'recon{dataset_abbrev[o]}_from_{dataset_abbrev[i]}'] = -log_likelihood.item()
+                recon = mean.squeeze(0).detach().cpu().numpy()
+                mse_loss[f'recon{dataset_abbrev[o]}_from_{dataset_abbrev[i]}'] = F.mse_loss(data[o][0], torch.from_numpy(recon))
+                # recon_df = pd.DataFrame(recon)
+                # recon_df['Diet'] = data[o][2]
+                # recon_df['MouseID'] = data[o][3]
+                # #recon_df = recon_df.assign(**data[o][2])
+                # #recon_df.to_csv(os.path.join(output_path, f'recon{dataset_abbrev[o]}_epoch{epoch}_vae{dataset_abbrev[i]}.csv'), index=False)
+                # print(f'Reconstructed {dataset_abbrev[o]} data from {dataset_abbrev[i]} encoder saved')
+        mse_loss_df = pd.DataFrame([mse_loss])
+        mse_loss_df.to_csv(os.path.join(output_path, f'cross_recon_mse_epoch{epoch}.csv'), index=False)
+        reconstruction_loss_df = pd.DataFrame([reconstruction_loss])
+        reconstruction_loss_df.to_csv(os.path.join(output_path, f'cross_recon_nloglikel_epoch{epoch}.csv'), index=False)
 

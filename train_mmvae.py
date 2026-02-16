@@ -2,22 +2,29 @@ import torch
 import torch.utils.data
 from utils import*
 
-def train(epoch, model, optimizer, train_loader, num_samples, device):
+def train(epoch, model, optimizer, train_loader, num_samples, device, epochs):
     model.train()
     total_loss = 0
     for i, data in enumerate(train_loader):
         
         # unpack/prepare data
-        x_mnist = data[0][0].to(device)
-        x_svhn = data[1][0].to(device)
-        x_data = [x_mnist, x_svhn]
-
+        x_1 = data[0][0].to(device)
+        x_2 = data[1][0].to(device)
+        x_data = [x_1, x_2]
         # x_data.to(device) maybe don't need this?
         optimizer.zero_grad()
         #loss = model.moe_elbo_loss(x_data, K=num_samples)
-        loss = model.moe_iwae_loss(x_data, K=num_samples)
+        step = int(epochs / 3)
+        if epoch < step: 
+            beta = 0.0
+        elif epoch >= step or epoch <= (2 * step): 
+            beta = (epoch - step) / (step)
+        else: 
+            beta = 1.0
+        evidence, lpx_zs, kls, lpxz_ind = model.moe_iwae_loss(x_data, beta, K=num_samples)
+        #evidence, lqzs, lpx_zs, lqz_xs = model.moe_dreg_loss(x_data, K=num_samples)
         #loss = model._m_iwae(x_data, K=num_samples)
-
+        loss = -evidence
         loss.backward()
         optimizer.step()
 
@@ -25,30 +32,20 @@ def train(epoch, model, optimizer, train_loader, num_samples, device):
     
     print(f'====> Epoch: {epoch:03d} Train loss: {total_loss / len(train_loader.dataset):.4f}')
 
-    return total_loss / len(train_loader.dataset)
+    return total_loss / len(train_loader.dataset), lpx_zs, kls, lpxz_ind
 
-def test(epoch, model, optimizer, test_loader, num_samples, device, output_path):
+def test(epoch, model, optimizer, test_loader, num_samples, device, output_path, dataset_abbrev):
     model.eval()
     total_loss = 0
     with torch.no_grad():
         for i, test_data in enumerate(test_loader):
-            x_mnist = test_data[0][0].to(device)
-            x_svhn = test_data[1][0].to(device)
-            x_test_data = [x_mnist, x_svhn]
-
+            
             optimizer.zero_grad()
-            #loss = model.moe_elbo_loss(x_test_data, K=num_samples)
-            #loss = model._m_iwae(x_test_data, K=num_samples)
-            loss = model.moe_iwae_loss(x_test_data, K=num_samples)
-            total_loss += loss.item()
-            if i == 0:
-                model.reconstruct(x_test_data, output_path, epoch)
-                print('Finished test reconstruction')
-            total_loss += loss.item()
-        save_latent_space(model, epoch, test_loader, device, output_path, 2)
+            # loss = model.moe_iwae_loss(x_test_data, K=num_samples)
+            # total_loss += loss.item()
+            #total_loss += loss.item()
+            model.reconstruct(test_data, output_path, epoch, dataset_abbrev)
+            print('Finished test reconstruction')
 
-    print(f'====> Epoch: {epoch:03d} Test loss: {total_loss / len(test_loader.dataset):.4f}')
-
-    return total_loss / len(test_loader)
-
-
+            torch.save(model, os.path.join(output_path, f'saved_model_epoch{epoch}.pth'))
+            print('Model saved')
