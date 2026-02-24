@@ -37,8 +37,12 @@ class VAE_MNIST(nn.Module):
     #     return mu + eps*std
 
     def decode(self, z):
+        print(z.shape)
         h3 = F.relu(self.fc3(z))
+        print(h3.shape)
         mean = torch.sigmoid(self.fc4(h3))
+        print(mean.shape)
+        exit()
         mean = mean.clamp(Constants.eta, 1 - Constants.eta)
         scale = torch.tensor(0.75).to(z.device)
         return mean, scale

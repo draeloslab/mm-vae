@@ -65,9 +65,9 @@ if __name__ == "__main__":
     for epoch in range(1, epochs+1):
         loss = train(epoch, model, optimizer, train_loader, num_samples, device)
         total_loss.append(loss) 
-        #if epoch in [step, step * 2, step * 3, step * 4, step * 5]:
         step = int(epoch / 5)
-        if epoch in [step, step * 2, step * 3, step * 4, step * 5]:
+        if epoch == 1 or epoch == 2: 
+        #if epoch in [step, step * 2, step * 3, step * 4, step * 5]:
             test_epochs.append(epoch)
             test_loss = test(epoch, model, optimizer, test_loader, num_samples, device, output_folder)
             total_test_loss.append(test_loss)

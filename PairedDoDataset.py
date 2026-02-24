@@ -15,16 +15,29 @@ class PairedDODataset(Dataset):
     def __getitem__(self, idx):
         sample = self.paired_df.iloc[idx]
 
-        # for the genoprobs data 
-        genetic_df = torch.tensor(sample[1:self.genetic_dims].values.astype('float32'))
-        genetic_label = sample[self.label_col]
-        genetic_diet = sample[self.diet_col]
-        genetic_id = sample[self.id_col]
+        if self.label_col == 'Diet_num':
+            # for the genoprobs data 
+            genetic_df = torch.tensor(sample[1:self.genetic_dims].values.astype('float32'))
+            genetic_label = sample[self.label_col] - 1
+            genetic_diet = sample[self.diet_col]
+            genetic_id = sample[self.id_col]
 
-        # for the physiological data 
-        physio_df = torch.tensor(sample[self.genetic_dims:-1].values.astype('float32'))
-        physio_label = sample[self.label_col]
-        physio_diet = sample[self.diet_col]
-        physio_id = sample[self.id_col]
+            # for the physiological data 
+            physio_df = torch.tensor(sample[self.genetic_dims:-1].values.astype('float32'))
+            physio_label = sample[self.label_col] - 1
+            physio_diet = sample[self.diet_col]
+            physio_id = sample[self.id_col]
+        else:
+            # for the genoprobs data 
+            genetic_df = torch.tensor(sample[1:self.genetic_dims].values.astype('float32'))
+            genetic_label = sample[self.label_col]
+            genetic_diet = sample[self.diet_col]
+            genetic_id = sample[self.id_col]
+
+            # for the physiological data 
+            physio_df = torch.tensor(sample[self.genetic_dims:-4].values.astype('float32'))
+            physio_label = sample[self.label_col]
+            physio_diet = sample[self.diet_col]
+            physio_id = sample[self.id_col]
 
         return (genetic_df, genetic_label, genetic_diet, genetic_id), (physio_df, physio_label, physio_diet, physio_id)

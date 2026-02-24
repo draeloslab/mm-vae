@@ -1,0 +1,28 @@
+import torch 
+import torch.nn as nn
+import torch.optim as optim 
+import torch.nn.functional as F
+
+class simple_mlp(nn.Module):
+    def __init__(self, latent_dim=5, hidden_dim=20):
+        super(simple_mlp, self).__init__()
+        self.latent_dim = latent_dim
+        #self.fc1 = nn.Linear(latent_dim + 1, 20)
+        self.fc1 = nn.Linear(latent_dim, hidden_dim)
+        self.tanh1 = nn.Tanh()
+        #self.dropout = nn.Dropout(p=0.5)
+        #self.relu = nn.ReLU()]
+        self.fc2 = nn.Linear(hidden_dim, 1)
+        #self.tanh2 = nn.Tanh()
+        #self.tanh = nn.Tanh()
+        #self.fc3 = nn.Linear(32, 1)
+
+    def forward(self, x):
+        out = self.fc1(x)
+        #out = self.relu(out)
+        out = self.tanh1(out)
+        #out = self.dropout(out)
+        out = self.fc2(out)
+        #out = self.tanh2(out)
+        #out = self.fc3(out)  
+        return out 

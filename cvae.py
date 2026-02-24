@@ -1,5 +1,3 @@
-# this file will have the model architecture for the MoE mmVAE model 
-# from __future__ import print_function
 import torch
 import torch.utils.data
 from torch import nn
@@ -7,19 +5,19 @@ from torch.nn import functional as F
 import torch.distributions as dist
 from utils import Constants
 
-class VAE(nn.Module):
-    def __init__(self, input_dim, H1, H2, H3, latent_dim, scale):
-        super(VAE, self).__init__()
+# vae with conditional layer 
+class CVAE(nn.Module):
+    def __init__(self, input_dim, H1, H2, H3, latent_dim, scale, num_classes):
+        super(CVAE, self).__init__()
 
-        # self.qz_x = dist.Laplace # initializing laplace posterior
-        # self.px_z = dist.Laplace # initializing laplace likelihood
+        self.label = nn.Embedding(num_classes, 1)
         self.qz_x = dist.Normal # initializing normal posterior
         self.px_z = dist.Normal # initializing normal likelihood
         self.qz_x_params = None 
         self.latent_dim = latent_dim
         self.scale = scale
         # encoder
-        self.fc1 = nn.Linear(input_dim, H1)
+        self.fc1 = nn.Linear(input_dim + 1, H1)
         self.bn1 = nn.BatchNorm1d(H1)
         self.fc2 = nn.Linear(H1, H2)
         self.bn2 = nn.BatchNorm1d(H2)
@@ -30,7 +28,7 @@ class VAE(nn.Module):
         self.bn4 = nn.BatchNorm1d(self.latent_dim)
 
         # decoder
-        self.fc5 = nn.Linear(self.latent_dim, H3)
+        self.fc5 = nn.Linear(self.latent_dim + 1, H3)
         self.bn5 = nn.BatchNorm1d(H3)
         self.fc6 = nn.Linear(H3, H2)
         self.bn6 = nn.BatchNorm1d(H2)
@@ -39,7 +37,9 @@ class VAE(nn.Module):
         self.fc8 = nn.Linear(H1, input_dim)
         self.bn8 = nn.BatchNorm1d(input_dim)
 
-    def encode(self, x):
+    def encode(self, x, y):
+        y_emb = self.label(y).view(-1, 1)
+        x = torch.cat((x, y_emb), dim=1)
         h1 = torch.relu(self.fc1(x))
         h2 = torch.relu(self.fc2(h1))
         h3 = torch.relu(self.fc3(h2))
@@ -57,7 +57,9 @@ class VAE(nn.Module):
     #     eps = torch.randn_like(std)
     #     return mu + eps*std
 
-    def decode(self, z):
+    def decode(self, z, y):
+        y_exp = self.label(y).view(1, -1, 1).expand(z.size(0), -1, -1)
+        z = torch.cat((z, y_exp), dim=2)
         h5 = torch.relu(self.fc5(z))
         h6 = torch.relu(self.fc6(h5))
         h7 = torch.relu(self.fc7(h6))
@@ -66,14 +68,16 @@ class VAE(nn.Module):
         scale = torch.tensor(0.75).to(z.device)
         return mean, scale
 
-    def forward(self, x, K):
-        mu, logvar = self.encode(x)
+    def forward(self, x, y, K):
+
+        mu, logvar = self.encode(x, y)
+
         std = torch.exp(0.5 * logvar)
         self.qz_x_params = [mu, std]
         qz_x = self.qz_x(*self.qz_x_params)
 
         zs = qz_x.rsample(torch.Size([K]))
-        mean, scale = self.decode(zs)
+        mean, scale = self.decode(zs, y)
         px_z = self.px_z(mean, scale)
 
-        return qz_x, px_z, zs
+        return qz_x, px_z, zs, y

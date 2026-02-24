@@ -11,7 +11,10 @@ def train(epoch, model, optimizer, train_loader, num_samples, device, epochs):
         x_1 = data[0][0].to(device)
         x_2 = data[1][0].to(device)
         x_data = [x_1, x_2]
-        # x_data.to(device) maybe don't need this?
+        # prepare corresponding labels for inputting into the model 
+        y = data[0][1].to(device)
+        #y_2 = data[1][1].to(device)
+        #y_data = [y_1, y_1]
         optimizer.zero_grad()
         #loss = model.moe_elbo_loss(x_data, K=num_samples)
         step = int(epochs / 3)
@@ -21,7 +24,9 @@ def train(epoch, model, optimizer, train_loader, num_samples, device, epochs):
             beta = (epoch - step) / (step)
         else: 
             beta = 1.0
-        evidence, lpx_zs, kls, lpxz_ind = model.moe_iwae_loss(x_data, beta, K=num_samples)
+        #beta = 1.0
+        evidence, lpx_zs, kls, lpxz_ind = model.moe_iwae_cvae_loss(x_data, y, beta, K=num_samples)
+        #evidence, lpx_zs, kls, lpxz_ind = model.moe_iwae_loss(x_data, beta, K=num_samples)
         #evidence, lqzs, lpx_zs, lqz_xs = model.moe_dreg_loss(x_data, K=num_samples)
         #loss = model._m_iwae(x_data, K=num_samples)
         loss = -evidence

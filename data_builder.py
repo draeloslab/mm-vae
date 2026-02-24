@@ -11,10 +11,10 @@ def getDataLoaders(batch_size, shuffle=True, device='cuda'):
             and os.path.exists('/home/rachel/Desktop/mm-vae/data/test-ms-svhn-idx.pt')):
         raise RuntimeError('Generate transformed indices with the script in bin')
     # get transformed indices
-    t_mnist = torch.load('../data/train-ms-mnist-idx.pt')
-    t_svhn = torch.load('../data/train-ms-svhn-idx.pt')
-    s_mnist = torch.load('../data/test-ms-mnist-idx.pt')
-    s_svhn = torch.load('../data/test-ms-svhn-idx.pt')
+    t_mnist = torch.load('/home/rachel/Desktop/mm-vae/data/train-ms-mnist-idx.pt')
+    t_svhn = torch.load('/home/rachel/Desktop/mm-vae/data/train-ms-svhn-idx.pt')
+    s_mnist = torch.load('/home/rachel/Desktop/mm-vae/data/test-ms-mnist-idx.pt')
+    s_svhn = torch.load('/home/rachel/Desktop/mm-vae/data/test-ms-svhn-idx.pt')
 
     # load base datasets
     tx = transforms.ToTensor()
