@@ -135,25 +135,37 @@ class MM_CVAE(nn.Module):
                 #print('log prob scaled ' + str(log_prob_scaled.shape))
                 #print(log_prob_scaled.shape)
                 lpx_all.append(log_prob_scaled)
-                lpxz_ind.append(-1*log_prob_scaled.mean().detach().cpu().numpy())
+                #lpxz_ind.append(-1*log_prob_scaled.mean().detach().cpu().numpy())
+                lpxz_ind.append(log_prob_scaled)
             lpx_z = torch.stack(lpx_all).sum(0)
             #print('lpx_z ' + str(lpx_z.shape))
             # log importance weight
             lw = lpx_z + ((lpz - lqz_x) * beta)
             #lw = lpz + lpx_z - lqz_x
             #print('lw: ' + str(lw.shape))
-            #print(lpz.shape, lpx_z.shape, lqz_x.shape)
             log_iws.append(lw)
-            lpx_zs.append(-1*lpx_z.mean().detach().cpu().numpy())
-            kls.append((lqz_x - lpz).mean().detach().cpu().numpy())
+            w = torch.softmax(lw, dim=0)
+            if encoder == 0: 
+                for place in [0, 1]:
+                    lpxz_ind[place] = ((-1 * w * lpxz_ind[place]).sum(0).sum()).detach().cpu().numpy()
+            else:
+                for place in [2, 3]:
+                    lpxz_ind[place] = ((-1 * w * lpxz_ind[place]).sum(0).sum()).detach().cpu().numpy()
+            lpx_zs.append(((-1 * w * lpx_z).sum(0).sum()).detach().cpu().numpy())
+            #print(lpx_z.shape, (lqz_x - lpz).shape)
+            kls.append(((w * (lqz_x - lpz)).sum(0).sum()).detach().cpu().numpy())
         lw_all = torch.cat(log_iws, dim=0)
         #print('lw_all ' + str(lw_all.shape))
         # total ELBO is averaged log weights across m modalities 
         lw_all_reshape = lw_all.view(self.M, K, -1) # transform from (M*K, B) to (M, K, B)
         #print('lw_all_reshape ' + str(lw_all_reshape.shape))
         log_p_x = log_mean_exp(lw_all_reshape, dim=1)
+
         #print('log_p_x ' + str(log_p_x.shape))
-        avg_log_weight = log_p_x.sum(dim=0).mean()
+        #avg_log_weight = log_p_x.sum(dim=0).mean()
+        # CHANGING, because I think this may have been wrong 
+        avg_log_weight = log_p_x.sum(dim=1).mean(dim=0)
+
         return avg_log_weight, lpx_zs, kls, lpxz_ind
 
     def reconstruct(self, data, output_path, epoch, dataset_abbrev):
@@ -186,12 +198,12 @@ class MM_CVAE(nn.Module):
                 reconstruction_loss[f'recon{dataset_abbrev[o]}_from_{dataset_abbrev[i]}'] = -log_likelihood.item()
                 recon = mean.squeeze(0).detach().cpu().numpy()
                 mse_loss[f'recon{dataset_abbrev[o]}_from_{dataset_abbrev[i]}'] = F.mse_loss(data[o][0], torch.from_numpy(recon))
-                # recon_df = pd.DataFrame(recon)
+                recon_df = pd.DataFrame(recon)
                 # recon_df['Diet'] = data[o][2]
                 # recon_df['MouseID'] = data[o][3]
-                # #recon_df = recon_df.assign(**data[o][2])
-                # #recon_df.to_csv(os.path.join(output_path, f'recon{dataset_abbrev[o]}_epoch{epoch}_vae{dataset_abbrev[i]}.csv'), index=False)
-                # print(f'Reconstructed {dataset_abbrev[o]} data from {dataset_abbrev[i]} encoder saved')
+                recon_df = recon_df.assign(**data[o][2])
+                recon_df.to_csv(os.path.join(output_path, f'recon{dataset_abbrev[o]}_epoch{epoch}_vae{dataset_abbrev[i]}.csv'), index=False)
+                print(f'Reconstructed {dataset_abbrev[o]} data from {dataset_abbrev[i]} encoder saved')
         mse_loss_df = pd.DataFrame([mse_loss])
         mse_loss_df.to_csv(os.path.join(output_path, f'cross_recon_mse_epoch{epoch}.csv'), index=False)
         reconstruction_loss_df = pd.DataFrame([reconstruction_loss])

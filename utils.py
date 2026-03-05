@@ -1,5 +1,6 @@
 import torch
 import math
+from latent_regularizer import*
 from torchvision import transforms
 import torch.nn.functional as F
 import numpy as np
@@ -68,3 +69,32 @@ def save_latent_space(model, epoch, data_loader, device, output_path, num_modali
     full_latent_df = pd.concat(latent_mus, ignore_index=True)
     full_latent_df.to_csv(os.path.join(output_path, 'latent_space_epoch' + str(epoch) + '.csv'), index=False)
     print('Latent space at epoch '  + str(epoch) + ' saved.')
+
+# calculate ks and cv weights 
+def estimate_loss_coefficients(batch_size, gmm_centers, gmm_std, num_samples=100):
+    _, dimension = gmm_centers.shape
+    ks_losses, cv_losses = [], []
+    z_list = []
+    components = []
+    for i in range(num_samples):
+        z, comp  = draw_gmm_samples(
+            batch_size, gmm_centers, gmm_std)
+        ks_loss = mean_squared_kolmogorov_smirnov_distance_gmm_broadcasting(
+             embedding_matrix=z, gmm_centers=gmm_centers, gmm_std=gmm_std)
+        ks_loss = ks_loss.cpu().detach().numpy()
+        cv_loss = mean_squared_covariance_gmm(
+            embedding_matrix=z, gmm_centers=gmm_centers, gmm_std=gmm_std)
+        cv_loss = cv_loss.cpu().detach().numpy()
+
+        ks_losses.append(ks_loss)
+        cv_losses.append(cv_loss)
+
+        z_list.append(z)
+        components.extend(comp)
+
+    samples = torch.vstack(z_list)
+
+    ks_weight = 1 / np.mean(ks_losses)
+    cv_weight = 1 / np.mean(cv_losses)
+
+    return ks_weight, cv_weight, samples, components

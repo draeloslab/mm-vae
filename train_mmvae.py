@@ -2,7 +2,7 @@ import torch
 import torch.utils.data
 from utils import*
 
-def train(epoch, model, optimizer, train_loader, num_samples, device, epochs):
+def train(epoch, model, optimizer, train_loader, num_samples, device, epochs, model_type):
     model.train()
     total_loss = 0
     for i, data in enumerate(train_loader):
@@ -16,7 +16,7 @@ def train(epoch, model, optimizer, train_loader, num_samples, device, epochs):
         #y_2 = data[1][1].to(device)
         #y_data = [y_1, y_1]
         optimizer.zero_grad()
-        #loss = model.moe_elbo_loss(x_data, K=num_samples)
+
         step = int(epochs / 3)
         if epoch < step: 
             beta = 0.0
@@ -25,19 +25,26 @@ def train(epoch, model, optimizer, train_loader, num_samples, device, epochs):
         else: 
             beta = 1.0
         #beta = 1.0
-        evidence, lpx_zs, kls, lpxz_ind = model.moe_iwae_cvae_loss(x_data, y, beta, K=num_samples)
-        #evidence, lpx_zs, kls, lpxz_ind = model.moe_iwae_loss(x_data, beta, K=num_samples)
-        #evidence, lqzs, lpx_zs, lqz_xs = model.moe_dreg_loss(x_data, K=num_samples)
-        #loss = model._m_iwae(x_data, K=num_samples)
+        if model_type == 'VAE':
+            evidence, lpx_zs, kls, lpxz_ind = model.moe_iwae_loss(x_data, beta, K=num_samples)
+            #evidence, lqzs, lpx_zs, lqz_xs = model.moe_dreg_loss(x_data, K=num_samples)
+            #loss = model._m_iwae(x_data, K=num_samples)
+            #loss = model.moe_elbo_loss(x_data, K=num_samples)
+        elif model_type == 'CVAE':
+            evidence, lpx_zs, kls, lpxz_ind = model.moe_iwae_cvae_loss(x_data, y, beta, K=num_samples)
+        else: 
+            evidence, lpx_zs, kls, lpxz_ind = model.moe_elbo_cgmvae_loss(x_data, y, beta, K=num_samples)
         loss = -evidence
         loss.backward()
         optimizer.step()
 
         total_loss += loss.item()
     
-    print(f'====> Epoch: {epoch:03d} Train loss: {total_loss / len(train_loader.dataset):.4f}')
+    #print(f'====> Epoch: {epoch:03d} Train loss: {total_loss / len(train_loader.dataset):.4f}')
+    print(f'====> Epoch: {epoch:03d} Train loss: {total_loss:.4f}')
 
-    return total_loss / len(train_loader.dataset), lpx_zs, kls, lpxz_ind
+    #eturn total_loss / len(train_loader.dataset), lpx_zs, kls, lpxz_ind
+    return total_loss, lpx_zs, kls, lpxz_ind
 
 def test(epoch, model, optimizer, test_loader, num_samples, device, output_path, dataset_abbrev):
     model.eval()

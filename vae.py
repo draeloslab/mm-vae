@@ -44,6 +44,7 @@ class VAE(nn.Module):
         h2 = torch.relu(self.fc2(h1))
         h3 = torch.relu(self.fc3(h2))
         logvar = self.fc42(h3)
+        print(logvar)
         logvar = torch.clamp(logvar, min=-10, max=10)
         #return self.fc41(h3), F.softmax(logvar, dim=-1) * logvar.size(-1) + Constants.eta
         return self.fc41(h3), logvar
