@@ -44,10 +44,9 @@ class VAE(nn.Module):
         h2 = torch.relu(self.fc2(h1))
         h3 = torch.relu(self.fc3(h2))
         logvar = self.fc42(h3)
-        print(logvar)
-        logvar = torch.clamp(logvar, min=-10, max=10)
-        #return self.fc41(h3), F.softmax(logvar, dim=-1) * logvar.size(-1) + Constants.eta
-        return self.fc41(h3), logvar
+        #logvar = torch.clamp(logvar, min=-10, max=10)
+        return self.fc41(h3), F.softmax(logvar, dim=-1) * logvar.size(-1) + Constants.eta
+        #return self.fc41(h3), logvar
 
     # reparameterization done using rsample for laplacian 
     # # reparameterization reconstructs the sample process by sampling 
@@ -68,8 +67,8 @@ class VAE(nn.Module):
         return mean, scale
 
     def forward(self, x, K):
-        mu, logvar = self.encode(x)
-        std = torch.exp(0.5 * logvar)
+        mu, std = self.encode(x)
+        #std = torch.exp(0.5 * logvar)
         self.qz_x_params = [mu, std]
         qz_x = self.qz_x(*self.qz_x_params)
 
