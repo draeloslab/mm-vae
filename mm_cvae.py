@@ -106,6 +106,8 @@ class MM_CVAE(nn.Module):
         kls = []
         lpx_zs = []
         lpxz_ind = []
+        mse_loss = []
+        mse_cfm_loss = []
         
         for encoder in range(self.M):
             #print('encoder ' + str(encoder))
@@ -130,6 +132,11 @@ class MM_CVAE(nn.Module):
                 log_prob = px_zs[encoder][m].log_prob(x_data[m])
                 #print('log_prob ' + str(log_prob.shape))
                 # scale 
+                criterion_mse = nn.MSELoss()
+                rec_mod_loss = criterion_mse(px_zs[encoder][m].loc.squeeze()[:, :, :-1], x_data[m].unsqueeze(0).expand(K, -1, -1)[:, :, :-1])
+                mse_loss.append(rec_mod_loss.detach().cpu().numpy())
+                rec_cfm_loss = criterion_mse(px_zs[encoder][m].loc.squeeze()[:, :, -1], x_data[m].unsqueeze(0).expand(K, -1, -1)[:, :, -1])
+                mse_cfm_loss.append(rec_cfm_loss.detach().cpu().numpy())
                 scale = self.vaes[m].like_scale
                 log_prob_scaled = log_prob.reshape(K*B, -1).sum(dim=1).reshape(K, B) * scale
                 #print('log prob scaled ' + str(log_prob_scaled.shape))
@@ -166,7 +173,7 @@ class MM_CVAE(nn.Module):
         # CHANGING, because I think this may have been wrong 
         avg_log_weight = log_p_x.sum(dim=1).mean(dim=0)
 
-        return avg_log_weight, lpx_zs, kls, lpxz_ind
+        return avg_log_weight, lpx_zs, kls, lpxz_ind, mse_loss, mse_cfm_loss
 
     def reconstruct(self, data, output_path, epoch, dataset_abbrev):
         device = next(self.parameters()).device

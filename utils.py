@@ -24,6 +24,11 @@ def unnormalize(x, mean, std):
     #return unnorm(x) * 255
     return unnorm(x)
 
+def standardizer(input_array):
+    mean = np.mean(input_array)
+    std = np.std(input_array)
+    return (input_array - mean)/std
+
 # def unnormalize(x, mean, std):
 #     if (isinstance(mean, float)):
 #         out = x * std + mean

@@ -1,21 +1,31 @@
 # this file will have the model architecture for the MoE mmVAE model 
 # from __future__ import print_function
 import torch.distributions as dist
-from cvae import*
+from VAE_model_architectures import*
 from utils import*
 import torch.nn.functional as F
 from latent_regularizer import*
 
 class MM_CGMVAE(nn.Module):
-    def __init__(self, input_dim1, input_dim2, H1_1, H2_1, H3_1, H1_2, H2_2, H3_2, latent_dim, scale1, scale2, num_classes, gmm_centers, gmm_std, ks_weight, cv_weight, learn_prior: bool = False):
+    def __init__(self, input_dim, H1, H2, H3, latent_dim, scales, num_classes, gmm_centers, gmm_std, ks_weight, cv_weight):
         super(MM_CGMVAE, self).__init__()
         
         ## add parameter initializations in main class
-        self.vae1 = CVAE(input_dim1, H1_1, H2_1, H3_1, latent_dim, scale1, num_classes)
-        self.vae2 = CVAE(input_dim2, H1_2, H2_2, H3_2, latent_dim, scale2, num_classes)
-        self.vaes = nn.ModuleList([self.vae1, self.vae2])
-        self.scaling = [scale1, scale2]
-        self.M = len(self.vaes)
+        self.M = len(input_dim)
+        vae_list = []
+        for m in range(self.M):
+            vae_list.append(Autoencoder_CGMVAE(input_dim[m], input_dim[m], H1[m], H2[m], H3[m], latent_dim, num_classes))
+        self.vaes = nn.ModuleList(vae_list)
+
+        for i, vae in enumerate(self.vaes):
+            vae.like_scale = scales[i]
+
+        # self.vae1 = Autoencoder_CGMVAE(input_dim1, input_dim1, H1_1, H2_1, H3_1, latent_dim, num_classes)
+        # self.vae2 = Autoencoder_CGMVAE(input_dim2, input_dim2, H1_2, H2_2, H3_2, latent_dim, num_classes)
+        self.num_classes = num_classes
+        self.latent_dim = latent_dim
+        #self.vaes = nn.ModuleList([self.vae1, self.vae2])
+        self.scaling = scales
         self.latent_dim = latent_dim
 
         # gaussian mixture parameters 
@@ -24,15 +34,11 @@ class MM_CGMVAE(nn.Module):
         self.ks_weight = ks_weight
         self.cv_weight = cv_weight 
 
-        # add scaling factors for calculating combined loss across the two modalities 
-        self.vae1.like_scale = scale1
-        self.vae2.like_scale = scale2
-
-        # initializing learned prior
-        # dictionary object to determine if prior will be learned or not.
-        grad = {'requires_grad': learn_prior}
+        # # add scaling factors for calculating combined loss across the two modalities 
+        # self.vae1.like_scale = scale1
+        # self.vae2.like_scale = scale2
     
-    def forward(self, x, y, num_samples):
+    def forward(self, x, y, cfm):
         # forward pass through joint encoder distributions 
         # qz_xs stores posteriors qz_x for each modality 
         qz_xs = []
@@ -48,7 +54,7 @@ class MM_CGMVAE(nn.Module):
             # px_z is the self-reconstruction likelihood (diagonal of px_zs)
             # zs is the latent samples 
             #print(y[m].shape)
-            qz_x, px_z, zs, y = vae(x[m], y, num_samples) # num samples is relevant for calculating IWAE loss 
+            qz_x, px_z, zs = vae(x[m], y, cfm) 
             qz_xs.append(qz_x)
             zss.append(zs)
             ys.append(y)
@@ -64,77 +70,96 @@ class MM_CGMVAE(nn.Module):
         return qz_xs, zss, px_zs
     
     #def moe_elbo_cgmvae_loss(self, x_data, y_data, beta, gmm_centers, gmm_std, ks_weight, cv_weight, K=1):
-    def moe_elbo_cgmvae_loss(self, x_data, y_data, beta, K=1):
+    def moe_elbo_cgmvae_loss(self, x_data, y_data, cfm, layer1_data):
 
-        qz_xs, zss, px_zs = self.forward(x_data, y_data, num_samples=K)
-        
-        encoder_loss = []
+        qz_xs, zss, px_zs = self.forward(x_data, y_data, cfm)
+
+        encoder_loss = 0.0
         kls = []
         lpx_zs = []
         lpxz_ind = []
+
+        mse_loss = []
+        mse_cfm_loss = []
+
         for encoder in range(self.M):
             z_r = zss[encoder]
 
-            K, B = zss[encoder].shape[:2]
-
-            print(z_r.shape)
-            print(self.gmm_centers.shape)
             ks_loss = mean_squared_kolmogorov_smirnov_distance_gmm_broadcasting(z_r, self.gmm_centers, self.gmm_std)
             cv_loss = mean_squared_covariance_gmm(z_r, self.gmm_centers, self.gmm_std)
             kl_loss = self.ks_weight * ks_loss + self.cv_weight * cv_loss
             
-            recon_loss = []
+            recon_loss = 0.0
             for m in range(self.M):
                 criterion_mse = nn.MSELoss(reduction='none')
-                rec_mod_loss = criterion_mse(px_zs[encoder][m], x_data[m])
+                rec_data_loss = criterion_mse(px_zs[encoder][m].loc, layer1_data[m])
                 scale = self.vaes[m].like_scale
-                recon_loss.append(rec_mod_loss * scale)
-                lpxz_ind.append(rec_mod_loss * scale)
-            
-            encoder_loss.append(np.mean(recon_loss) + beta * kl_loss)
-            kls.append(kl_loss)
-            lpx_zs.append(np.mean(recon_loss))
-        
-        return np.mean(encoder_loss), lpx_zs, kls, lpxz_ind
+                loss_count = rec_data_loss.mean(dim=0)[0:-1].mean()
+                loss_cfm = rec_data_loss.mean(dim=0)[-1]
+                mse_loss.append(loss_count.detach().cpu().numpy())
+                mse_cfm_loss.append(loss_cfm.detach().cpu().numpy())
 
-    def reconstruct(self, data, output_path, epoch, dataset_abbrev):
+                total_recon = loss_count + loss_cfm
+                recon_loss += total_recon * scale
+                lpxz_ind.append(total_recon.detach().cpu().numpy() * scale)
+            
+            encoder_loss += recon_loss / self.M + kl_loss
+            kls.append(kl_loss.detach().cpu().numpy())
+            lpx_zs.append(np.mean(recon_loss.detach().cpu().numpy()))
+        
+        return encoder_loss / self.M, lpx_zs, kls, lpxz_ind, mse_loss, mse_cfm_loss
+
+    def reconstruct(self, data, output_path, epoch, dataset_abbrev, meta):
         device = next(self.parameters()).device
-        x1 = data[0][0].to(device)
-        x2 = data[1][0].to(device)
-        y = data[1][1].to(device)
+        df1_layer1 = data[0][0].to(device)
+        df2_layer1 = data[1][0].to(device)
+        x1 = data[0][1].to(device)
+        x2 = data[1][1].to(device)
+        y = data[0][2].to(device)
+        cfm = data[0][3].to(device)
         input_data = [x1, x2]
+        input_layers = [df1_layer1, df2_layer1]
         reconstruction_loss = {}
         mse_loss = {}
+        mse_cfm_loss = {}
         for i, vae in enumerate(self.vaes):
-            mu, logvar = vae.encode(input_data[i], y)
-            qz = vae.qz_x(mu, torch.exp(logvar))
-            z = qz.rsample(torch.Size([1]))
-            latent_vectors = z.squeeze().detach().cpu().numpy()
+            mu, std, z, y, cfm = vae.encode(input_data[i], y, cfm)
+            latent_vectors = z.detach().cpu().numpy()
             latent_space = pd.DataFrame(latent_vectors, columns=[f'LV{i+1}' for i in range(latent_vectors.shape[1])])
-            if 'HC' in dataset_abbrev:
-                latent_space = latent_space.assign(**data[i][2])
-            else:
-                latent_space['Label'] = data[i][1] # for DO 
-                latent_space['Diet'] =  data[i][2] # for DO
-                latent_space['MouseID'] = data[i][3] # for DO
+            # else:
+            #     latent_space['Label'] = data[i][1] # for DO 
+            #     latent_space['Diet'] =  data[i][2] # for DO
+            #     latent_space['MouseID'] = data[i][3] # for DO
+            latent_space['bin'] = y.detach().cpu().numpy()
+            latent_space['cfm'] = cfm.detach().cpu().numpy()
             latent_space['encoder'] = np.repeat(dataset_abbrev[i], latent_space.shape[0])
+            for col_name, values in meta.items():
+                latent_space[col_name] = values
             latent_space.to_csv(os.path.join(output_path, f'latent_variables_epoch{epoch}_vae{dataset_abbrev[i]}.csv'), index=False)
             print(f'Encoded features from {dataset_abbrev[i]} encoder saved')
             for o, vae_out in enumerate(self.vaes): 
                 mean, scale = vae_out.decode(z, y)
                 px_z = vae_out.px_z(mean, scale)
-                log_likelihood = px_z.log_prob(input_data[o]).sum(dim=-1).mean()
+                log_likelihood = px_z.log_prob(input_layers[o]).sum(dim=-1).mean()
                 reconstruction_loss[f'recon{dataset_abbrev[o]}_from_{dataset_abbrev[i]}'] = -log_likelihood.item()
-                recon = mean.squeeze(0).detach().cpu().numpy()
-                mse_loss[f'recon{dataset_abbrev[o]}_from_{dataset_abbrev[i]}'] = F.mse_loss(data[o][0], torch.from_numpy(recon))
-                recon_df = pd.DataFrame(recon)
-                # recon_df['Diet'] = data[o][2]
-                # recon_df['MouseID'] = data[o][3]
-                recon_df = recon_df.assign(**data[o][2])
-                recon_df.to_csv(os.path.join(output_path, f'recon{dataset_abbrev[o]}_epoch{epoch}_vae{dataset_abbrev[i]}.csv'), index=False)
-                print(f'Reconstructed {dataset_abbrev[o]} data from {dataset_abbrev[i]} encoder saved')
-        mse_loss_df = pd.DataFrame([mse_loss])
-        mse_loss_df.to_csv(os.path.join(output_path, f'cross_recon_mse_epoch{epoch}.csv'), index=False)
-        reconstruction_loss_df = pd.DataFrame([reconstruction_loss])
-        reconstruction_loss_df.to_csv(os.path.join(output_path, f'cross_recon_nloglikel_epoch{epoch}.csv'), index=False)
+                criterion_mse = nn.MSELoss(reduction='none')
+                overall_mse = criterion_mse(mean, input_layers[o])
+
+                mse_loss[f'recon{dataset_abbrev[o]}_from_{dataset_abbrev[i]}'] = overall_mse.mean(dim=0)[0:-1].mean().detach().cpu().numpy()
+                mse_cfm_loss[f'recon{dataset_abbrev[o]}_from_{dataset_abbrev[i]}'] = overall_mse.mean(dim=0)[-1].mean().detach().cpu().numpy()
+
+                # recon = mean.detach().cpu().numpy()
+                # recon_df = pd.DataFrame(recon)
+                # recon_df['bin'] = y.detach().cpu().numpy()
+                # recon_df['cfm'] = cfm.detach().cpu().numpy()
+                # recon_df.to_csv(os.path.join(output_path, f'recon{dataset_abbrev[o]}_epoch{epoch}_vae{dataset_abbrev[i]}.csv'), index=False)
+                # print(f'Reconstructed {dataset_abbrev[o]} data from {dataset_abbrev[i]} encoder saved')
+        mse_series = pd.Series(mse_loss, name='mse_loss')
+        mse_cfm_series = pd.Series(mse_cfm_loss, name='mse_cfm_loss')
+        llik_series = pd.Series(reconstruction_loss, name='loglik_loss')
+        recon_eval_df = pd.concat([mse_series, mse_cfm_series, llik_series], axis=1)
+        recon_eval_df.index.name = 'encoder/decoder'
+        recon_eval_df = recon_eval_df.reset_index()
+        recon_eval_df.to_csv(os.path.join(output_path, f'reconstruction_metrics_epoch{epoch}.csv'), index=False)
+
 

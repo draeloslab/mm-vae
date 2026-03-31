@@ -1,3 +1,4 @@
+# this file will calculate the KL divergence for the MoE mmvae 
 import torch
 import numpy as np
 from itertools import combinations
@@ -51,14 +52,14 @@ def mean_squared_kolmogorov_smirnov_distance_gmm_broadcasting(embedding_matrix, 
     emb_num, emb_dim = sorted_embeddings.shape[-2:]
     num_gmm_centers, _ = gmm_centers.shape
 
-    empirical_cdf_vec = torch.linspace(start=1 / emb_num,
+    empirical_cdf = torch.linspace(start=1 / emb_num,
     end=1.0,
     steps=emb_num,
     device=embedding_matrix.device,
     dtype=embedding_matrix.dtype).unsqueeze(-1)
 
-    # Expand it to match the number of latent dimensions
-    empirical_cdf = empirical_cdf_vec.expand(-1, emb_dim) 
+    # # Expand it to match the number of latent dimensions
+    # empirical_cdf = empirical_cdf_vec.expand(-1, emb_dim) 
 
     sorted_embeddings = sorted_embeddings.to(embedding_matrix.device)
     gmm_centers = gmm_centers.to(embedding_matrix.device)

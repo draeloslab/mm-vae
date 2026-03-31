@@ -6,9 +6,9 @@ import torch.distributions as dist
 from utils import Constants
 
 # vae with conditional layer 
-class CVAE(nn.Module):
+class CGMVAE(nn.Module):
     def __init__(self, input_dim, H1, H2, H3, latent_dim, scale, num_classes):
-        super(CVAE, self).__init__()
+        super(CGMVAE, self).__init__()
 
         self.num_classes = num_classes
         self.label = nn.Embedding(num_classes, 1)
@@ -24,9 +24,8 @@ class CVAE(nn.Module):
         self.bn2 = nn.BatchNorm1d(H2)
         self.fc3 = nn.Linear(H2, H3)
         self.bn3 = nn.BatchNorm1d(H3)
-        self.fc41 = nn.Linear(H3, self.latent_dim)
-        self.fc42 = nn.Linear(H3, self.latent_dim)
-        self.bn4 = nn.BatchNorm1d(self.latent_dim)
+        self.fc41 = nn.Linear(H3, self.latent_dim * self.num_classes)
+        self.fc42 = nn.Linear(H3, self.latent_dim * self.num_classes)
 
         # decoder
         self.fc5 = nn.Linear(self.latent_dim + 1, H3)
@@ -46,20 +45,21 @@ class CVAE(nn.Module):
         h3 = torch.sigmoid(self.bn3(self.fc3(h2)))
         logvar = self.fc42(h3)
         #logvar = torch.clamp(logvar, min=-10, max=10)
-        return self.fc41(h3), F.softmax(logvar, dim=-1) * logvar.size(-1) + Constants.eta
-        #return self.fc41(h3), logvar
+        #return self.fc41(h3), F.softmax(logvar, dim=-1) * logvar.size(-1) + Constants.eta
+        return self.fc41(h3), logvar
 
-    # reparameterization reconstructs the sample process by sampling 
-    # from a standard normal dist (epsilon) and deterministically 
-    # transformming this random epsilon by z = mu + sigma * epsilon
-    def reparameterize(self, mu, std):
-        #std = torch.exp(0.5*logvar)
-        eps = torch.randn_like(std)
-        return mu + eps*std
+    def gaussian_sampler(self, mu, logsigma, y):
+        y = y.long().view(-1)
+        batch_size = y.shape[0]
+        mu_k = mu[torch.arange(batch_size), y]  
+        sigma_k = torch.exp(0.5 * logsigma[torch.arange(batch_size), y])
+        eps = torch.randn_like(sigma_k)
+        z = mu_k + eps * sigma_k
+        return mu_k, sigma_k, z
 
     def decode(self, z, y):
-        y_exp = self.label(y).view(1, -1, 1).expand(z.size(0), -1, -1)
-        z = torch.cat((z, y_exp), dim=2)
+        y_exp = self.label(y)
+        z = torch.cat((z, y_exp), dim=1)
         h5 = self.bn5(torch.sigmoid(self.fc5(z)))
         h6 = self.bn6(torch.sigmoid(self.fc6(h5)))
         h7 = self.bn7(torch.sigmoid(self.fc7(h6)))
@@ -70,11 +70,10 @@ class CVAE(nn.Module):
 
     def forward(self, x, y, K):
         mu, std = self.encode(x, y)
-        #std = torch.exp(0.5 * logvar)
-        self.qz_x_params = [mu, std]
+        mu, std, z = self.gaussian_sampler(mu.view(-1, self.num_classes, self.latent_dim), std.view(-1, self.num_classes, self.latent_dim), y)
+        self.qz_x_params = [mu, torch.exp(0.5 * std)]
         qz_x = self.qz_x(*self.qz_x_params)
-        zs = qz_x.rsample(torch.Size([K]))
-        mean, scale = self.decode(zs, y)
+        mean, scale = self.decode(z, y)
         px_z = self.px_z(mean, scale)
 
-        return qz_x, px_z, zs, y
+        return qz_x, px_z, z, y
