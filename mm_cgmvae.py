@@ -162,4 +162,26 @@ class MM_CGMVAE(nn.Module):
         recon_eval_df = recon_eval_df.reset_index()
         recon_eval_df.to_csv(os.path.join(output_path, f'reconstruction_metrics_epoch{epoch}.csv'), index=False)
 
+    def get_latent_space(self, data, dataset_abbrev, meta):
+        device = next(self.parameters()).device
+        df1_layer1 = data[0][0].to(device)
+        df2_layer1 = data[1][0].to(device)
+        x1 = data[0][1].to(device)
+        x2 = data[1][1].to(device)
+        y = data[0][2].to(device)
+        cfm = data[0][3].to(device)
+        input_data = [x1, x2]
+        input_layers = [df1_layer1, df2_layer1]
+        full_latent_space = []
+        for i, vae in enumerate(self.vaes):
+            mu, std, z, y, cfm = vae.encode(input_data[i], y, cfm)
+            latent_vectors = z.detach().cpu().numpy()
+            latent_space = pd.DataFrame(latent_vectors, columns=[f'LV{i+1}' for i in range(latent_vectors.shape[1])])
+            latent_space['bin'] = y.detach().cpu().numpy()
+            latent_space['cfm'] = cfm.detach().cpu().numpy()
+            latent_space['encoder'] = np.repeat(dataset_abbrev[i], latent_space.shape[0])
+            for col_name, values in meta.items():
+                latent_space[col_name] = values
+            full_latent_space.append(latent_space)
+        return pd.concat(full_latent_space, ignore_index=True)
 

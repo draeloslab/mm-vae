@@ -1,11 +1,15 @@
-import torch
-import math
-from latent_regularizer import*
-from torchvision import transforms
-import torch.nn.functional as F
-import numpy as np
 import os
+import math
+import torch
+import numpy as np
 import pandas as pd
+import torch.nn.functional as F
+from latent_regularizer import*
+from scipy.stats import spearmanr
+from torchvision import transforms
+from sklearn.metrics import roc_auc_score
+from sklearn.neighbors import KernelDensity
+
 
 # constants defined in the mmvae paper (for clamping values)
 class Constants(object):
@@ -23,18 +27,6 @@ def unnormalize(x, mean, std):
     unnorm = transforms.Normalize(new_mean, new_std)
     #return unnorm(x) * 255
     return unnorm(x)
-
-def standardizer(input_array):
-    mean = np.mean(input_array)
-    std = np.std(input_array)
-    return (input_array - mean)/std
-
-# def unnormalize(x, mean, std):
-#     if (isinstance(mean, float)):
-#         out = x * std + mean
-#     else: 
-#         out = [x * s + m for m, s in zip(mean, std)]
-#     return out * - 1
 
 def log_mean_exp(value, dim=0, keepdim=False):
     # calculate log(mean(exp(value)))
@@ -103,3 +95,74 @@ def estimate_loss_coefficients(batch_size, gmm_centers, gmm_std, num_samples=100
     cv_weight = 1 / np.mean(cv_losses)
 
     return ks_weight, cv_weight, samples, components
+
+def standardizer(input_array):
+    mean = np.mean(input_array)
+    std = np.std(input_array)
+    return (input_array - mean)/std
+
+def numpyToTensor(x):
+    return torch.from_numpy(x)
+
+# functions to compute phenotypic projection 
+def line_coordinates_euclidean(A, B, P):
+    A = np.array(A)
+    B = np.array(B)
+    P = np.array(P)
+
+    u_hat = (B - A) / np.linalg.norm(B - A)  # Unit direction vector from A to B
+    s = np.dot(P - A, u_hat)                # Signed distance from A
+    P_proj = A + s * u_hat                  # Projected point on the line
+
+    return P_proj, s
+
+def project_row(row, coord_cols, sus, res):
+    coords = row[coord_cols].values
+    proj, dist = line_coordinates_euclidean(sus, res, coords)
+    return pd.Series({'Projected': proj,'Signed_Distance': dist})
+
+# functions for calculating OSD 
+def compute_kde_peak(values, bandwidth=0.1, grid_size=1000):
+    """Estimate KDE peak (mode) location."""
+    values = values[:, None]
+    kde = KernelDensity(kernel='gaussian', bandwidth=bandwidth).fit(values)
+    grid = np.linspace(values.min(), values.max(), grid_size)[:, None]
+    log_dens = kde.score_samples(grid)
+    peak = grid[np.argmax(log_dens)][0]
+    return peak
+
+def compute_osd(df, projection_col='PP', bin_col='bin', bandwidth=0.1):
+    # Step 1: Compute KDE peaks for each bin
+    bins_sorted = sorted(df[bin_col].unique())
+    peak_locs = []
+    for b in bins_sorted:
+        values = df[df[bin_col] == b][projection_col].values
+        if len(values) > 1:
+            peak = compute_kde_peak(values, bandwidth=bandwidth)
+        else:
+            peak = np.nan
+        peak_locs.append(peak)
+
+    # Step 2: Spearman correlation
+    rho, _ = spearmanr(bins_sorted, peak_locs)
+
+    # Step 3: Pairwise adjacent AUCs → Somers' D
+    D_list = []
+    for i in range(len(bins_sorted) - 1):
+        b_low, b_high = bins_sorted[i], bins_sorted[i + 1]
+        df_pair = df[df[bin_col].isin([b_low, b_high])].copy()
+        df_pair['label'] = (df_pair[bin_col] == b_high).astype(int)
+        auc = roc_auc_score(df_pair['label'], df_pair[projection_col])
+        D = 2 * auc - 1
+        D_list.append(D)
+
+    D_avg = np.mean(D_list)
+    osd = rho * D_avg
+
+    return {
+        'rho_spearman': rho,
+        'somers_d_adjacent': D_avg,
+        'osd': osd,
+        'peak_locations': dict(zip(bins_sorted, peak_locs)),
+        'pairwise_D': D_list,
+    }

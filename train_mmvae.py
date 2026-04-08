@@ -9,6 +9,7 @@ def train(epoch, model, optimizer, train_loader, num_samples, device, epochs, mo
         
         # unpack/prepare data
         df1_layer1 = data[0][0].to(device)
+
         df2_layer1 = data[1][0].to(device)
         layer1_data = [df1_layer1, df2_layer1]
         x_1 = data[0][1].to(device)
@@ -16,6 +17,7 @@ def train(epoch, model, optimizer, train_loader, num_samples, device, epochs, mo
         x_data = [x_1, x_2]
         y = data[0][2].to(device)
         cfm = data[0][3].to(device)
+
         optimizer.zero_grad()
 
         if model_type == 'CGMVAE':
