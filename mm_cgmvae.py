@@ -70,7 +70,7 @@ class MM_CGMVAE(nn.Module):
         return qz_xs, zss, px_zs
     
     #def moe_elbo_cgmvae_loss(self, x_data, y_data, beta, gmm_centers, gmm_std, ks_weight, cv_weight, K=1):
-    def moe_elbo_cgmvae_loss(self, x_data, y_data, cfm, layer1_data):
+    def moe_elbo_cgmvae_loss(self, x_data, y_data, cfm, layer1_data, strain_col, residual_col):
 
         qz_xs, zss, px_zs = self.forward(x_data, y_data, cfm)
 
@@ -82,12 +82,17 @@ class MM_CGMVAE(nn.Module):
         mse_loss = []
         mse_cfm_loss = []
 
+        bin_means = []
+
         for encoder in range(self.M):
             z_r = zss[encoder]
 
-            ks_loss = mean_squared_kolmogorov_smirnov_distance_gmm_broadcasting(z_r, self.gmm_centers, self.gmm_std)
-            cv_loss = mean_squared_covariance_gmm(z_r, self.gmm_centers, self.gmm_std)
-            kl_loss = self.ks_weight * ks_loss + self.cv_weight * cv_loss
+            ks_loss = mean_squared_kolmogorov_smirnov_distance_gmm_broadcasting(z_r, self.gmm_centers[encoder], self.gmm_std)
+            cv_loss = mean_squared_covariance_gmm(z_r, self.gmm_centers[encoder], self.gmm_std)
+            kl_loss = self.ks_weight[encoder] * ks_loss + self.cv_weight[encoder] * cv_loss
+
+            # track bin means for epoch 
+            bin_means.append(torch.stack([z_r[y_data == label].mean(dim=0) for label in torch.unique(y_data)]).detach().cpu().numpy())
             
             recon_loss = 0.0
             for m in range(self.M):
@@ -106,9 +111,58 @@ class MM_CGMVAE(nn.Module):
             encoder_loss += recon_loss / self.M + kl_loss
             kls.append(kl_loss.detach().cpu().numpy())
             lpx_zs.append(np.mean(recon_loss.detach().cpu().numpy()))
-        
-        return encoder_loss / self.M, lpx_zs, kls, lpxz_ind, mse_loss, mse_cfm_loss
 
+            osd = get_osd_from_latents_torch(zss, y_data.detach().cpu().numpy(), residual_col, strain_col, self.latent_dim)
+
+        return encoder_loss / self.M, lpx_zs, kls, lpxz_ind, mse_loss, mse_cfm_loss, osd.detach().cpu().numpy(), bin_means
+
+    def moe_elbo_cgmvae_loss_train_osd(self, x_data, y_data, cfm, layer1_data, strain_col, residual_col):
+
+        qz_xs, zss, px_zs = self.forward(x_data, y_data, cfm)
+
+        encoder_loss = 0.0
+        kls = []
+        lpx_zs = []
+        lpxz_ind = []
+
+        mse_loss = []
+        mse_cfm_loss = []
+
+        osd_enc = []
+
+        bin_means = []
+        for encoder in range(self.M):
+            z_r = zss[encoder]
+
+            ks_loss = mean_squared_kolmogorov_smirnov_distance_gmm_broadcasting(z_r, self.gmm_centers[encoder], self.gmm_std)
+            cv_loss = mean_squared_covariance_gmm(z_r, self.gmm_centers[encoder], self.gmm_std)
+            kl_loss = self.ks_weight[encoder] * ks_loss + self.cv_weight[encoder] * cv_loss
+
+            # track bin means for epoch 
+            bin_means.append(torch.stack([z_r[y_data == label].mean(dim=0) for label in torch.unique(y_data)]).detach().cpu().numpy())
+            
+            recon_loss = 0.0
+            for m in range(self.M):
+                criterion_mse = nn.MSELoss(reduction='none')
+                rec_data_loss = criterion_mse(px_zs[encoder][m].loc, layer1_data[m])
+                scale = self.vaes[m].like_scale
+                loss_count = rec_data_loss.mean(dim=0)[0:-1].mean()
+                loss_cfm = rec_data_loss.mean(dim=0)[-1]
+                mse_loss.append(loss_count.detach().cpu().numpy())
+                mse_cfm_loss.append(loss_cfm.detach().cpu().numpy())
+
+                total_recon = loss_count + loss_cfm
+                recon_loss += total_recon * scale
+                lpxz_ind.append(total_recon.detach().cpu().numpy() * scale)
+
+            encoder_loss += recon_loss / self.M + kl_loss 
+            kls.append(kl_loss.detach().cpu().numpy())
+            lpx_zs.append(np.mean(recon_loss.detach().cpu().numpy()))
+        
+            osd = get_osd_from_latents_torch(zss, y_data.detach().cpu().numpy(), residual_col, strain_col, self.latent_dim)
+        return encoder_loss / self.M + ((1-osd) * 50), lpx_zs, kls, lpxz_ind, mse_loss, mse_cfm_loss, osd.detach().cpu().numpy(), bin_means
+        #return ((1-osd) * 20000), lpx_zs, kls, lpxz_ind, mse_loss, mse_cfm_loss, osd
+    
     def reconstruct(self, data, output_path, epoch, dataset_abbrev, meta):
         device = next(self.parameters()).device
         df1_layer1 = data[0][0].to(device)
@@ -168,6 +222,7 @@ class MM_CGMVAE(nn.Module):
         df2_layer1 = data[1][0].to(device)
         x1 = data[0][1].to(device)
         x2 = data[1][1].to(device)
+        pair_id = np.arange(1, x1.shape[0] + 1)
         y = data[0][2].to(device)
         cfm = data[0][3].to(device)
         input_data = [x1, x2]
@@ -180,8 +235,11 @@ class MM_CGMVAE(nn.Module):
             latent_space['bin'] = y.detach().cpu().numpy()
             latent_space['cfm'] = cfm.detach().cpu().numpy()
             latent_space['encoder'] = np.repeat(dataset_abbrev[i], latent_space.shape[0])
-            for col_name, values in meta.items():
-                latent_space[col_name] = values
+            latent_space['pair'] = pair_id
+            latent_space['14-6-residual'] = data[2].detach().cpu().numpy()
+            latent_space['strain'] = data[3]
+            # for col_name, values in meta.items():
+            #     latent_space[col_name] = values
             full_latent_space.append(latent_space)
         return pd.concat(full_latent_space, ignore_index=True)
 
