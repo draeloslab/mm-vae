@@ -29,16 +29,16 @@ For each trajectory:
    - the direction toward the target endpoint
    - the local gradient of latent density
 
-The update direction is
-\[
+The update direction is:
+$$
 d=(1-\lambda)u+\lambda\nabla\log p(z)
-\]
+$$
 
 where:
-- \(u\) is the normalized direction toward the endpoint
-- \(p(z)\) is the latent-space density estimated by KDE
-- \(\lambda\) controls the strength of density guidance
-Low values of \(\lambda\) produce trajectories similar to linear interpolation, whereas larger values encourage trajectories to remain within high-density regions.
+- $$u$$ is the normalized direction toward the endpoint
+- $$p(z)$$ is the latent-space density estimated by KDE
+- $$\lambda$$ controls the strength of density guidance
+Low values of $$\lambda$$ produce trajectories similar to linear interpolation, whereas larger values encourage trajectories to remain within high-density regions.
 
 ### Output
 
@@ -57,19 +57,23 @@ The decoder reconstructs random-projection gene features rather than individual 
 ### Method
 
 The original preprocessing pipeline compressed gene expression using random projection:
-\[
+
+$$
 X' = XP
-\]
+$$
+
 where:
 
-- \(X\) is the original gene-expression matrix
-- \(P\) is the random projection matrix
-- \(X'\) is the reduced feature representation
+- $$X$$ is the original gene-expression matrix
+- $$P$$ is the random projection matrix
+- $$X'$$ is the reduced feature representation
 
 To approximately recover gene-level information, the Moore-Penrose pseudoinverse of the projection matrix is used:
-\[
+
+$$
 \hat X = X'(P^T)^+
-\]
+$$
+
 This produces reconstructed gene trajectories that can be analyzed directly.
 
 ## Stage 3: Trajectory-Derived CFM-Associated Gene List Curation
@@ -87,18 +91,17 @@ Only genes satisfying all three criteria are retained. This tells us which genes
 
 Each reconstructed RP feature is associated with thousands of original genes through the random projection matrix. For every RP feature, genes are ranked according to the absolute magnitude of their projection weights. Only the strongest contributors are retained:
 
-```python
-percentile_cutoff = 99.9
-```
+$$percentile_cutoff = 99.9$$
+
 This corresponds to the top 0.1% of genes for each RP feature. The rationale is that most genes contribute only weakly to a given RP feature, whereas a small subset dominates the feature's behavior.
 
 ### Step 2: Quantify Phenotype Association
 
 For each RP feature, the Pearson correlation with decoded cognitive resilience (CFM) values along the trajectory is computed:
 
-\[
+$$
 r_i = corr(RP_i, CFM)
-\]
+$$
 
 This measures whether the feature increases or decreases as resilience changes along the latent trajectory.
 
@@ -106,16 +109,15 @@ This measures whether the feature increases or decreases as resilience changes a
 
 A gene may contribute positively or negatively to an RP feature depending on the sign of its projection weight. To propagate phenotype association from RP features back to genes, an effective correlation score is computed:
 
-\[
-r_{eff}
-=
+$$
+r_{eff} =
 corr(RP_i,CFM)
 \times sign(w_{ij})
-\]
+$$
 
 where:
-- \(w_{ij}\) is the projection weight connecting gene \(j\) to RP feature \(i\)
-- \(corr(RP_i,CFM)\) measures resilience association
+- $$w_{ij}$$ is the projection weight connecting gene \(j\) to RP feature \(i\)
+- $$corr(RP_i,CFM)$$ measures resilience association
 
 Interpretation:
 - Positive effective correlation:
@@ -129,17 +131,20 @@ For each gene, the largest absolute effective correlation observed across all RP
 
 #### C1 genes:
 
-\[
-r_{eff} \ge 0.65
-\]
+$$correlation_threshold = 0.65$$
+
+$$
+r_{eff} \ge correlation_threshold
+$$
 
 Genes positively associated with resilience.
 
 #### C2 genes:
 
-\[
-r_{eff} \le -0.65
-\]
+$$
+r_{eff} \le correlation_threshold
+$$
+
 
 Genes negatively associated with resilience.
 
