@@ -1,0 +1,26 @@
+name: u19_varnika
+channels:
+  - pytorch
+  - nvidia
+  - conda-forge
+  - defaults
+
+dependencies:
+  - python=3.11
+  - pytorch
+  - pytorch-cuda=12.1
+  - numpy
+  - pandas
+  - scipy
+  - scikit-learn
+  - matplotlib
+  - seaborn
+  - jupyter
+  - ipykernel
+  - psutil
+  - h5py
+  - openpyxl
+  - tqdm
+  - pip
+  - pip:
+      - sobol_seq
