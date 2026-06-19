@@ -6,12 +6,10 @@ Downstream analysis pipeline for trained C-GMVAE. Involves:
   2) Reconstructing trajectory gene features back to original gene space
   3) Curating trajectory-derived gene lists 
   4) Computing Integrated Gradients gene-to-LV importance
-  5) Optionally combining IG-derived genes with trajectory-derived genes
 
 Note:
-  - Edit only the ExperimentConfig block or pass args from the command line..
+  - Edit only the ExperimentConfig block or pass args from the command line. 
 """
-
 from __future__ import annotations
 
 import argparse
@@ -22,11 +20,12 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Sequence, Tuple
-
 import joblib
+import math
+
 import numpy as np
 import pandas as pd
-import math
+import matplotlib.pyplot as plt
 import torch
 import torch.nn as nn
 from scipy.signal import savgol_filter
@@ -54,15 +53,15 @@ class ExperimentConfig:
     run_name: str = "cgmvae_pipeline"
 
     project_dir: Path = Path("/home/varnika/draelos_lab/proj_VAE")
-    output_root: Path = Path("/home/varnika/draelos_lab/proj_VAE/results/experiments/training20_supcon_knn16_t0.2_b512_ep5k_seed29_normalstart")
-    model_dir: Path = Path("/home/varnika/draelos_lab/proj_VAE/results/experiments/training20_supcon_knn16_t0.2_b512_ep5k_seed29_normalstart")
+    output_root: Path = Path("/home/varnika/draelos_lab/proj_VAE/results/experiments/training23_supcon_knn16_t0.2_b512_ep5k_seed29_normalstart")
+    model_dir: Path = Path("/home/varnika/draelos_lab/proj_VAE/results/experiments/training23_supcon_knn16_t0.2_b512_ep5k_seed29_normalstart")
     data_dir: Path = Path("/nfs/turbo/umms-kaczoro/u19-shared/vae-mouse-hc-updated/14_mon_HC_ADBXD_subset")
 
-    model_path: Path = Path("/home/varnika/draelos_lab/proj_VAE/results/experiments/training20_supcon_knn16_t0.2_b512_ep5k_seed29_normalstart/saved_model_epoch5000.pth")
+    model_path: Path = Path("/home/varnika/draelos_lab/proj_VAE/results/experiments/training23_supcon_knn16_t0.2_b512_ep5k_seed29_normalstart/saved_model_epoch5000.pth")
     rp_gene_csv: Path = Path("/nfs/turbo/umms-kaczoro/u19-shared/vae-mouse-hc-updated/14_mon_HC_ADBXD_subset/all_cells_adbxd_14mon_rp_nor.csv")
     cfm_csv: Path = Path("/nfs/turbo/umms-kaczoro/u19-shared/vae-mouse-hc-updated/14_mon_HC_ADBXD_subset/all_cells_adbxd_14mon_rp_nor.csv")
-    latent_csv: Path = Path("/home/varnika/draelos_lab/proj_VAE/results/experiments/training20_supcon_knn16_t0.2_b512_ep5k_seed29_normalstart/latent_variables_epoch5000.csv")
-    recons_csv: Path = Path("/home/varnika/draelos_lab/proj_VAE/results/experiments/training20_supcon_knn16_t0.2_b512_ep5k_seed29_normalstart/recons_epoch5000.csv")
+    latent_csv: Path = Path("/home/varnika/draelos_lab/proj_VAE/results/experiments/training23_supcon_knn16_t0.2_b512_ep5k_seed29_normalstart/latent_variables_epoch5000.csv")
+    recons_csv: Path = Path("/home/varnika/draelos_lab/proj_VAE/results/experiments/training23_supcon_knn16_t0.2_b512_ep5k_seed29_normalstart/recons_epoch5000.csv")
 
     rp_pipeline_path: Path = Path("/nfs/turbo/umms-kaczoro/u19-shared/vae-mouse-hc-updated/14_mon_HC_ADBXD_subset/random_projection.pkl")
     gene_list_path: Path = Path("/nfs/turbo/umms-kaczoro/u19-shared/vae-mouse-hc-updated/14_mon_HC_ADBXD_subset/gene_list.csv")
@@ -81,7 +80,7 @@ class ExperimentConfig:
 
     # ~~~~ Density-guided interpolation ~~~~
     num_pairs: int = 10
-    num_interpolation_steps: int = 24
+    num_interpolation_steps: int = 48
     density_weights: List[float] = field(default_factory=lambda: [0.1, 0.4, 0.5, 0.9])
     selected_density: float = 0.4
     knn: int = 5
@@ -517,17 +516,91 @@ def save_full_trajectory_and_latents(
             df_latent_out.to_csv(out_dir / f"{pair_id}_dw{dw}_latent.csv", index=False)
 
 
+def plot_decoded_cfm(
+    all_interpolations: Dict[str, dict],
+    cfg: ExperimentConfig,
+    out_dir: Path,
+    title: str = "",
+    figsize: Tuple[int, int] = (10, 7),
+    smooth: bool = False,
+    window: int = 5,
+    poly: int = 2,
+) -> None:
+    ensure_dir(out_dir)
+
+    df_cfm = pd.read_csv(cfg.cfm_csv)
+    mean_cfm = df_cfm[cfg.raw_cfm_col].mean()
+    std_cfm = df_cfm[cfg.raw_cfm_col].std()
+
+    for pair_id, data in all_interpolations.items():
+        cfm_dict = {
+            dw: label_data["decoded_cfm"]
+            for dw, label_data in data["labels"].items()
+        }
+
+        plt.figure(figsize=figsize)
+        viridis_colors = plt.cm.viridis(np.linspace(0, 1, len(cfm_dict)))
+
+        for i, (dw, cfm_values) in enumerate(sorted(cfm_dict.items())):
+            cfm_values = np.asarray(cfm_values, dtype=float)
+
+            if smooth and len(cfm_values) >= window:
+                smoothed = savgol_filter(
+                    cfm_values,
+                    window_length=window,
+                    polyorder=poly,
+                )
+                smoothed[0] = cfm_values[0]
+                smoothed[-1] = cfm_values[-1]
+                cfm_values = smoothed
+
+            cfm_values = cfm_values * std_cfm + mean_cfm
+
+            plt.plot(
+                range(len(cfm_values)),
+                cfm_values,
+                label=f"Density weight {dw}",
+                color=viridis_colors[i],
+                marker="o",
+                linewidth=3.2,
+                markersize=7,
+                alpha=0.9,
+            )
+
+        plt.xlabel("Step in trajectory", fontsize=20)
+        plt.ylabel("14 month CFM score", fontsize=20)
+        plt.xticks(fontsize=13)
+        plt.yticks(fontsize=13)
+        plt.title(title, fontsize=12)
+        plt.grid(True, linestyle="-", linewidth=1.0, color="gray", alpha=0.8)
+        plt.legend(
+            fontsize=15,
+            frameon=True,
+            fancybox=True,
+            framealpha=0.9,
+            borderpad=1.2,
+            loc="best",
+        )
+        plt.tight_layout()
+
+        plt.savefig(out_dir / f"{pair_id}_decoded_cfm_trajectories.png", dpi=300, bbox_inches="tight")
+        plt.savefig(out_dir / f"{pair_id}_decoded_cfm_trajectories.jpg", dpi=300, bbox_inches="tight")
+        plt.close()
+        
+
 def run_trajectory_stage(cfg: ExperimentConfig, model: nn.Module) -> None:
     print("\nGenerating latent trajectories...")
     df_latent = load_latent_dataframe(cfg)
 
     fwd = generate_all_interpolations(cfg, model, df_latent, reverse=False)
     save_full_trajectory_and_latents(fwd, cfg.trajectories_dir)
+    plot_decoded_cfm(fwd, cfg, cfg.output_root / "trajectory_plots")
     print(f"Saved forward trajectories to: {cfg.trajectories_dir}")
 
     if cfg.generate_reverse:
         rev = generate_all_interpolations(cfg, model, df_latent, reverse=True)
         save_full_trajectory_and_latents(rev, cfg.reverse_trajectories_dir)
+        plot_decoded_cfm(rev, cfg, cfg.output_root / "trajectory_plots_reverse")
         print(f"Saved reverse trajectories to: {cfg.reverse_trajectories_dir}")
 
 
@@ -1166,6 +1239,60 @@ def get_elbow_genes(
     return out
 
 
+def plot_lv_importance_curves(
+    gene_to_lv_importance: pd.DataFrame,
+    cfg: ExperimentConfig,
+    out_dir: Path,
+    gamma: Optional[float] = None,
+    pad: float = 0.05,
+    ncols: int = 3,
+) -> None:
+    ensure_dir(out_dir)
+
+    if gamma is None:
+        gamma = cfg.ig_gamma
+
+    n_lv = gene_to_lv_importance.shape[0]
+    nrows = math.ceil(n_lv / ncols)
+
+    fig, axes = plt.subplots(nrows, ncols, figsize=(16, 4 * nrows))
+    axes = np.asarray(axes).flatten()
+
+    for i in range(n_lv):
+        lv_scores = pd.to_numeric(
+            gene_to_lv_importance.iloc[i, :],
+            errors="coerce",
+        ).dropna()
+
+        lv_sorted = lv_scores.sort_values(ascending=False)
+
+        mu = lv_sorted.mean()
+        if not np.isclose(mu, 0):
+            lv_power = mu * (lv_sorted / mu) ** gamma
+        else:
+            lv_power = lv_sorted.copy()
+
+        x = np.arange(1, len(lv_power) + 1)
+
+        axes[i].plot(x, lv_power.values)
+        axes[i].set_title(f"LV{i + 1}")
+        axes[i].set_xlabel("Gene Importance rank")
+        axes[i].set_ylabel("IG importance score")
+
+        xmin, xmax = 1, len(lv_power)
+        xr = max(1, xmax - xmin)
+        axes[i].set_xlim(xmin - pad * xr, xmax + pad * xr)
+
+    for j in range(n_lv, len(axes)):
+        fig.delaxes(axes[j])
+
+    plt.tight_layout()
+
+    plt.savefig(out_dir / "all_LV_IG_importance_elbow_curves.png", dpi=300, bbox_inches="tight")
+    plt.savefig(out_dir / "all_LV_IG_importance_elbow_curves.jpg", dpi=300, bbox_inches="tight")
+    plt.close()
+
+
 def run_ig_stage(cfg: ExperimentConfig, model: nn.Module) -> None:
     print("\nComputing Integrated Gradients...")
     ensure_dir(cfg.ig_dir)
@@ -1179,14 +1306,31 @@ def run_ig_stage(cfg: ExperimentConfig, model: nn.Module) -> None:
     gene_to_lv_importance = compute_gene_to_lv_importance(cfg, saliency_df)
     gene_to_lv_importance.to_csv(cfg.ig_dir / "gene_to_LV_importance.csv")
 
-    elbow_genes = get_elbow_genes(
-        gene_to_lv_importance,
-        gamma=cfg.ig_gamma,
-        min_genes=cfg.ig_min_genes,
-    )
+    plot_lv_importance_curves(gene_to_lv_importance, cfg, cfg.ig_dir)
+
+    elbow_genes = get_elbow_genes(gene_to_lv_importance, gamma=cfg.ig_gamma, min_genes=cfg.ig_min_genes)
+
+    master_dfs = []
 
     for lv, df in elbow_genes.items():
         df.to_csv(cfg.ig_dir / f"elbow_genes_{lv}.csv", index=False)
+
+        df_master = df.copy()
+        df_master.insert(0, "latent_variable", lv)
+        df_master.insert(1, "elbow_rank", range(1, len(df_master) + 1))
+        master_dfs.append(df_master)
+
+    if master_dfs:
+        master_elbow_df = pd.concat(master_dfs, axis=0, ignore_index=True)
+        master_elbow_df.to_csv(cfg.ig_dir / "master_elbow_genes_all_LVs.csv", index=False)
+
+        common_n_genes = (master_elbow_df.groupby("latent_variable").size().min())
+    
+        master_elbow_equal_df = (master_elbow_df.groupby("latent_variable", group_keys=False).head(common_n_genes))
+    
+        master_elbow_equal_df.to_csv(cfg.ig_dir / "master_elbow_genes_all_LVs_equalnumber.csv", index=False)
+    
+        print(f"Common number of genes per LV: {common_n_genes}")
 
     print(f"Saved IG outputs to: {cfg.ig_dir}")
 
