@@ -54,7 +54,6 @@ def test(epoch, model, optimizer, test_loader, num_samples, device, output_path,
     total_loss = 0
     with torch.no_grad():
         for i, test_data in enumerate(test_loader):
-            optimizer.zero_grad()
             # loss = model.moe_iwae_loss(x_test_data, K=num_samples)
             # total_loss += loss.item()
             #total_loss += loss.item()
