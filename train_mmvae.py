@@ -27,8 +27,6 @@ def train(epoch, model, optimizer, train_loader, num_samples, device, epochs, mo
             if train_osd:
                 residual_col = data[2] 
                 strain_col = data[3]
-                print('train_osd')
-                exit()
                 loss, lpx_zs, kls, lpxz_ind, mse_loss, mse_cfm_loss, osd_enc, bin_means = model.moe_elbo_cgmvae_loss_train_osd(x_data, y, cfm, layer1_data, strain_col, residual_col)
             else: 
                 loss, lpx_zs, kls, lpxz_ind, mse_loss, mse_cfm_loss, osd_enc, bin_means = model.moe_elbo_cgmvae_loss(x_data, y, cfm, layer1_data, strain_col, residual_col)
@@ -52,11 +50,10 @@ def train(epoch, model, optimizer, train_loader, num_samples, device, epochs, mo
     return total_loss, lpx_zs, kls, lpxz_ind, mse_loss, mse_cfm_loss, osd_enc, bin_means
 
 def test(epoch, model, optimizer, test_loader, num_samples, device, output_path, dataset_abbrev, meta):
-    model.eval()
+    model.train()
     total_loss = 0
     with torch.no_grad():
         for i, test_data in enumerate(test_loader):
-            
             optimizer.zero_grad()
             # loss = model.moe_iwae_loss(x_test_data, K=num_samples)
             # total_loss += loss.item()

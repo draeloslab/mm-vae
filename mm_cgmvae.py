@@ -112,7 +112,7 @@ class MM_CGMVAE(nn.Module):
             kls.append(kl_loss.detach().cpu().numpy())
             lpx_zs.append(np.mean(recon_loss.detach().cpu().numpy()))
 
-            osd = get_osd_from_latents_torch(zss, y_data.detach().cpu().numpy(), residual_col, strain_col, self.latent_dim)
+            proj, osd = get_osd_from_latents_torch(zss, y_data.detach().cpu().numpy(), residual_col, strain_col, self.latent_dim)
 
         return encoder_loss / self.M, lpx_zs, kls, lpxz_ind, mse_loss, mse_cfm_loss, osd.detach().cpu().numpy(), bin_means
 
@@ -144,6 +144,7 @@ class MM_CGMVAE(nn.Module):
             recon_loss = 0.0
             for m in range(self.M):
                 criterion_mse = nn.MSELoss(reduction='none')
+                #pd.DataFrame(px_zs[encoder][m].loc.detach().cpu().numpy()).to_csv('/home/rachel/Desktop/mm-vae results/multiregion_adbxd_cr_figureResults/multiregion_samecenters_seed10_trainosd50/END_TRAIN_RECON.csv.', index=False)
                 rec_data_loss = criterion_mse(px_zs[encoder][m].loc, layer1_data[m])
                 scale = self.vaes[m].like_scale
                 loss_count = rec_data_loss.mean(dim=0)[0:-1].mean()
@@ -159,7 +160,7 @@ class MM_CGMVAE(nn.Module):
             kls.append(kl_loss.detach().cpu().numpy())
             lpx_zs.append(np.mean(recon_loss.detach().cpu().numpy()))
         
-            osd = get_osd_from_latents_torch(zss, y_data.detach().cpu().numpy(), residual_col, strain_col, self.latent_dim)
+            proj, osd = get_osd_from_latents_torch(zss, y_data.detach().cpu().numpy(), residual_col, strain_col, self.latent_dim)
         return encoder_loss / self.M + ((1-osd) * 50), lpx_zs, kls, lpxz_ind, mse_loss, mse_cfm_loss, osd.detach().cpu().numpy(), bin_means
         #return ((1-osd) * 20000), lpx_zs, kls, lpxz_ind, mse_loss, mse_cfm_loss, osd
     
@@ -171,13 +172,24 @@ class MM_CGMVAE(nn.Module):
         x2 = data[1][1].to(device)
         y = data[0][2].to(device)
         cfm = data[0][3].to(device)
+        residual_col = data[2] 
+        strain_col = data[3]
         input_data = [x1, x2]
         input_layers = [df1_layer1, df2_layer1]
         reconstruction_loss = {}
         mse_loss = {}
         mse_cfm_loss = {}
+        zss = []
+        encoder_col = []
         for i, vae in enumerate(self.vaes):
             mu, std, z, y, cfm = vae.encode(input_data[i], y, cfm)
+            zss.append(z)
+            encoder_col.append(np.repeat(dataset_abbrev[i], z.shape[0]))
+            #proj, osd = get_osd_from_latents_torch([z], y, residual_col, strain_col, z.shape[1])
+            # single_proj = pd.DataFrame(proj.detach().cpu().numpy(), columns = ['value', 'bin'])
+            # single_proj['encoder'] = np.repeat(dataset_abbrev[i], single_proj.shape[0])
+            # single_proj['osd'] = np.repeat(osd.detach().cpu().numpy(), single_proj.shape[0])
+            # single_proj.to_csv(os.path.join(output_path, f'phenotypic_projection_epoch{epoch}_vae{dataset_abbrev[i]}.csv'), index=False)
             latent_vectors = z.detach().cpu().numpy()
             latent_space = pd.DataFrame(latent_vectors, columns=[f'LV{i+1}' for i in range(latent_vectors.shape[1])])
             # else:
@@ -198,16 +210,28 @@ class MM_CGMVAE(nn.Module):
                 reconstruction_loss[f'recon{dataset_abbrev[o]}_from_{dataset_abbrev[i]}'] = -log_likelihood.item()
                 criterion_mse = nn.MSELoss(reduction='none')
                 overall_mse = criterion_mse(mean, input_layers[o])
-
                 mse_loss[f'recon{dataset_abbrev[o]}_from_{dataset_abbrev[i]}'] = overall_mse.mean(dim=0)[0:-1].mean().detach().cpu().numpy()
                 mse_cfm_loss[f'recon{dataset_abbrev[o]}_from_{dataset_abbrev[i]}'] = overall_mse.mean(dim=0)[-1].mean().detach().cpu().numpy()
-
-                # recon = mean.detach().cpu().numpy()
-                # recon_df = pd.DataFrame(recon)
-                # recon_df['bin'] = y.detach().cpu().numpy()
-                # recon_df['cfm'] = cfm.detach().cpu().numpy()
-                # recon_df.to_csv(os.path.join(output_path, f'recon{dataset_abbrev[o]}_epoch{epoch}_vae{dataset_abbrev[i]}.csv'), index=False)
-                # print(f'Reconstructed {dataset_abbrev[o]} data from {dataset_abbrev[i]} encoder saved')
+                recon = mean.detach().cpu().numpy()
+                recon_df = pd.DataFrame(recon)
+                recon_df['bin'] = y.detach().cpu().numpy()
+                recon_df['cfm'] = cfm.detach().cpu().numpy()
+                recon_df.to_csv(os.path.join(output_path, f'recon{dataset_abbrev[o]}_epoch{epoch}_vae{dataset_abbrev[i]}.csv'), index=False)
+                print(f'Reconstructed {dataset_abbrev[o]} data from {dataset_abbrev[i]} encoder saved')
+        proj, osd = get_osd_from_latents_torch(zss, y, residual_col, strain_col, zss[0].shape[1])
+        all_proj = pd.DataFrame(proj.detach().cpu().numpy(), columns = ['value', 'bin'])
+        all_proj['encoder'] = np.concatenate(encoder_col, axis=0)
+        all_proj['overall_osd'] = np.repeat(osd.detach().cpu().numpy(), all_proj.shape[0])
+        osd_across_proj = []
+        for i, encoder in enumerate(dataset_abbrev):
+            half = int(all_proj.shape[0] / 2)
+            if i == 0:
+                osd = calc_osd_diff(proj[:half, 0], proj[:half, 1])
+            else: 
+                osd = calc_osd_diff(proj[half:, 0], proj[half:, 1])
+            osd_across_proj.append(np.repeat(osd.detach().cpu().numpy(), half))
+        all_proj['encoder_osd'] = np.concatenate(osd_across_proj, axis=0)
+        all_proj.to_csv(os.path.join(output_path, f'phenotypic_projection_epoch{epoch}.csv'), index=False)
         mse_series = pd.Series(mse_loss, name='mse_loss')
         mse_cfm_series = pd.Series(mse_cfm_loss, name='mse_cfm_loss')
         llik_series = pd.Series(reconstruction_loss, name='loglik_loss')

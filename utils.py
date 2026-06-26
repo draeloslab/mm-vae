@@ -250,8 +250,28 @@ def get_osd_from_latents_torch(zss, label_col, residual_col, strain_col, latent_
     dot_prod = torch.sum(relative_pos * line_vec, dim=1)
     projected_scores = dot_prod / torch.sqrt(line_len_sq)
 
-    bin_tensor = torch.tensor(label_col, dtype=torch.float32, device=coords.device)
+    bin_tensor = torch.as_tensor(label_col, dtype=torch.float32, device=coords.device)
     bin_values = bin_tensor.repeat(num_repeats)
+
+    # replaces compute_osd function
+    unique_bins = torch.unique(bin_values).sort()[0]
+    bin_means = torch.stack([projected_scores[bin_values == b].mean() for b in unique_bins])
+
+    vx = bin_means - torch.mean(bin_means)
+    vy = unique_bins - torch.mean(unique_bins)
+
+    rho_est = torch.sum(vx * vy) / (torch.sqrt(torch.sum(vx ** 2)) * torch.sqrt(torch.sum(vy ** 2)) + 1e-8)
+
+    # Calculate differentiable version of Somers' D
+    diff = bin_means[1:] - bin_means[:-1]
+    somers_est = torch.tanh(diff).mean()
+
+    osd_val = rho_est * somers_est
+
+    return torch.stack([projected_scores, bin_values], dim=1), osd_val
+
+def calc_osd_diff(projected_scores, label_col):
+    bin_values = torch.as_tensor(label_col, dtype=torch.float32)
 
     # replaces compute_osd function
     unique_bins = torch.unique(bin_values).sort()[0]
