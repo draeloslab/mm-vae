@@ -167,48 +167,32 @@ def compute_osd(df, projection_col='PP', bin_col='bin', bandwidth=0.1):
         'pairwise_D': D_list,
     }
 
-
 # writing a function that takes in LV and returns the OSD values
-def get_osd_from_latents(zss, label_col, residual_col, strain_col, latent_dim): 
+def get_osd_from_latents(zss, label_col, cfm_col, latent_dim): 
     lv1 = zss[0].detach().cpu().numpy()
     df1 = pd.DataFrame(lv1, columns=[f'LV{i+1}' for i in range(lv1.shape[1])])
     coord_cols = df1.columns[:latent_dim]
-    df1['strain'] = strain_col
-    df1['14-6-residual'] = residual_col
+    df1['cfm'] = cfm_col
     df1['bin'] = label_col
     df1[coord_cols] = df1[coord_cols].apply(pd.to_numeric, errors='coerce').fillna(0)
 
     lv2 = zss[1].detach().cpu().numpy()
     df2 = pd.DataFrame(lv2, columns=[f'LV{i+1}' for i in range(lv2.shape[1])])
-    df2['strain'] = strain_col
-    df2['14-6-residual'] = residual_col
+    df2['cfm'] = cfm_col
     df2['bin'] = label_col
     df2[coord_cols] = df2[coord_cols].apply(pd.to_numeric, errors='coerce').fillna(0)
 
     df = pd.concat([df1, df2])
     df = df.reset_index(drop=True)
 
-    strain_order = (df.sort_values('14-6-residual', ascending=True)['strain'].unique())
-    strain_sus = strain_order[0]
-    strain_res = strain_order[-1]
+    mini = df.loc[df['cfm'].idxmin()]
+    maxi = df.loc[df['cfm'].idxmax()]
 
-    sus = (df[df['strain'] == strain_sus][coord_cols].apply(np.mean, axis=0).values)
-    res = (df[df['strain'] == strain_res][coord_cols].apply(np.mean, axis=0).values)
-
-    proj = df.apply(lambda x: project_row(x, coord_cols, sus, res), axis=1)
+    proj = df.apply(lambda x: project_row(x, coord_cols, mini, maxi), axis=1)
     df = pd.concat([
         df.reset_index(drop=True),
         pd.DataFrame(proj['Projected'].tolist(), columns=[f'Proj_{i+1}' for i in range(10)]),
         proj[['Signed_Distance']]], axis=1)
-
-    sus_cen = (df[df['bin'] == 0][coord_cols].apply(np.mean, axis=0).values)
-    res_cen = (df[df['bin'] == 3][coord_cols].apply(np.mean, axis=0).values)
-
-    _, s_sus_cen = line_coordinates_euclidean(sus, res, sus_cen)
-    _, s_res_cen = line_coordinates_euclidean(sus, res, res_cen)
-
-    _, sus_strain = line_coordinates_euclidean(sus, res, sus)
-    _, res_strain = line_coordinates_euclidean(sus, res, res)
 
     df.rename(columns={df.columns[-1]: 'PP'}, inplace=True)
 
@@ -216,32 +200,8 @@ def get_osd_from_latents(zss, label_col, residual_col, strain_col, latent_dim):
 
     return osd['osd']
 
-
-def get_osd_from_latents_torch(zss, label_col, residual_col, strain_col, latent_dim):
-    df_latents = torch.cat(zss, dim=0)
-
-    coords = df_latents[:, :latent_dim]
-    coords = torch.nan_to_num(coords, nan=0.0)
-
-    num_repeats = len(zss)
-
-    strain_array = np.tile(strain_col, num_repeats)
-    residual_array = np.tile(residual_col, num_repeats)
-
-    unique_strains = []
-    sorted_idx = np.argsort(residual_array)
-    for s in strain_array[sorted_idx]:
-        if s not in unique_strains:
-            unique_strains.append(s)
-
-    strain_sus_label = unique_strains[0]
-    strain_res_label = unique_strains[-1]
-
-    mask_sus = torch.tensor(strain_array == strain_sus_label, device=coords.device)
-    mask_res = torch.tensor(strain_array == strain_res_label, device=coords.device)
-
-    sus_anchor = coords[mask_sus].mean(dim=0)
-    res_anchor = coords[mask_res].mean(dim=0)
+def calc_single_osd(df_latents, bin_values, sus_anchor, res_anchor, temperature=0.5):
+    coords = torch.nan_to_num(df_latents, nan=0.0)
 
     line_vec = res_anchor - sus_anchor
     line_len_sq = torch.sum(line_vec ** 2) + 1e-8
@@ -249,9 +209,6 @@ def get_osd_from_latents_torch(zss, label_col, residual_col, strain_col, latent_
     relative_pos = coords - sus_anchor
     dot_prod = torch.sum(relative_pos * line_vec, dim=1)
     projected_scores = dot_prod / torch.sqrt(line_len_sq)
-
-    bin_tensor = torch.as_tensor(label_col, dtype=torch.float32, device=coords.device)
-    bin_values = bin_tensor.repeat(num_repeats)
 
     # replaces compute_osd function
     unique_bins = torch.unique(bin_values).sort()[0]
@@ -263,12 +220,90 @@ def get_osd_from_latents_torch(zss, label_col, residual_col, strain_col, latent_
     rho_est = torch.sum(vx * vy) / (torch.sqrt(torch.sum(vx ** 2)) * torch.sqrt(torch.sum(vy ** 2)) + 1e-8)
 
     # Calculate differentiable version of Somers' D
-    diff = bin_means[1:] - bin_means[:-1]
-    somers_est = torch.tanh(diff).mean()
+    # diff = bin_means[1:] - bin_means[:-1]
+    # somers_est = torch.tanh(diff).mean()
+
+    # Modifying to calculate somer's est using pairwise differences rather than differences between means 
+    soft_d_list = []
+    for i in range(len(unique_bins) - 1):
+        low_vals = projected_scores[bin_values == unique_bins[i]]
+        high_vals = projected_scores[bin_values == unique_bins[i + 1]]
+        pairwise_diff = high_vals[:, None] - low_vals[None, :]
+        soft_auc = torch.sigmoid(pairwise_diff / temperature).mean()
+        soft_d = 2.0 * soft_auc - 1.0
+        soft_d_list.append(soft_d)
+    somers_est = torch.stack(soft_d_list).mean()
 
     osd_val = rho_est * somers_est
 
-    return torch.stack([projected_scores, bin_values], dim=1), osd_val
+    return osd_val, projected_scores, bin_values
+
+def get_osd_from_latents_torch(zss, label_col, cfm_col, mode="single", state='train'):
+
+    osd_total = 0
+    osd_vals = []
+    sus_avg = 0
+    res_avg = 0
+    projected_scores = []
+    if state == 'train':
+        list = zss
+        comb = torch.cat(zss, dim=0)
+        labels = torch.as_tensor(np.tile(label_col,2), dtype=torch.float32)
+        cfm_both = torch.as_tensor(np.tile(cfm_col,2), dtype=torch.float32)
+        if mode == "single":
+            for zs in list:
+                sus_anchor = torch.mean(zs[torch.topk(cfm_col.flatten(), k=50, largest=False).indices], dim=0)
+                res_anchor = torch.mean(zs[torch.topk(cfm_col.flatten(), k=50).indices], dim=0)
+                # sus_anchor = zs[torch.argmin(cfm_col)]
+                # res_anchor = zs[torch.argmax(cfm_col)]
+                osd_val, projected_score, bin_value = calc_single_osd(zs, torch.as_tensor(label_col, dtype=torch.float32), sus_anchor, res_anchor)
+                osd_vals.append(osd_val.detach().cpu().numpy())
+                sus_avg += sus_anchor 
+                res_avg += res_anchor
+                projected_scores.append(torch.stack((projected_score, bin_value), dim=1))
+                osd_total += osd_val
+            # uncomment below lines if wanting to train with just single encoders
+            # sus_avg = comb[torch.argmin(cfm_both)]
+            # res_avg = comb[torch.argmax(cfm_both)]
+            osd_val, projected_score, bin_value = calc_single_osd(comb, labels, sus_avg / len(list), res_avg / len(list))
+            projected_scores.append(torch.stack((projected_score, bin_value), dim=1))
+            osd_total += osd_val
+            osd_vals.append(osd_val.detach().cpu().numpy())
+            overall_osd = osd_total / (len(zss)+1)
+            # uncomment below lines if wanting to train with just single encoders
+            # projected_scores.append(torch.cat(projected_scores, dim=0))
+            # overall_osd = osd_total / len(zss)
+            osd_vals.append(overall_osd.detach().cpu().numpy())
+        else: 
+            for zs in list: 
+                sus_anchor = torch.mean(zs[torch.topk(cfm_col.flatten(), k=50, largest=False).indices], dim=0)
+                res_anchor = torch.mean(zs[torch.topk(cfm_col.flatten(), k=50).indices], dim=0)
+                # sus_anchor = zs[torch.argmin(cfm_col)]
+                # res_anchor = zs[torch.argmax(cfm_col)]
+                sus_avg += sus_anchor 
+                res_avg += res_anchor
+            overall_osd, projected_score, bin_value = calc_single_osd(comb, labels, sus_avg / len(list), res_avg / len(list))
+            # uncomment row below and comment rows above to train osd for only a single encoder 
+            #overall_osd, projected_score, bin_value = calc_single_osd(zss[1], torch.as_tensor(label_col, dtype=torch.float32), zss[1][torch.argmin(cfm_col)], zss[1][torch.argmax(cfm_col)])
+            projected_scores = torch.stack((projected_score, bin_value), dim=1)
+            osd_vals.append(overall_osd.detach().cpu().numpy())
+            osd_vals.append(overall_osd.detach().cpu().numpy())
+            osd_vals.append(overall_osd.detach().cpu().numpy())
+    else:
+        list = [zss]
+        comb = zss
+        labels = torch.as_tensor(label_col, dtype=torch.float32)
+        cfm_both = torch.as_tensor(cfm_col, dtype=torch.float32)
+        sus_anchor = torch.mean(comb[torch.topk(cfm_both, k=50, largest=False).indices], dim=0)
+        res_anchor = torch.mean(comb[torch.topk(cfm_both, k=50).indices], dim=0)
+        # sus_anchor = comb[torch.argmin(cfm_both)]
+        # res_anchor = comb[torch.argmax(cfm_both)]
+        overall_osd, projected_score, bin_value = calc_single_osd(comb, labels, sus_anchor, res_anchor)
+        projected_scores = torch.stack((projected_score, bin_value), dim=1)
+        osd_vals.append(overall_osd.detach().cpu().numpy())
+        osd_vals.append(overall_osd.detach().cpu().numpy())
+        osd_vals.append(overall_osd.detach().cpu().numpy())
+    return projected_scores, overall_osd, osd_vals, sus_avg / len(list), res_avg / len(list)
 
 def calc_osd_diff(projected_scores, label_col):
     bin_values = torch.as_tensor(label_col, dtype=torch.float32)
@@ -283,7 +318,7 @@ def calc_osd_diff(projected_scores, label_col):
     rho_est = torch.sum(vx * vy) / (torch.sqrt(torch.sum(vx ** 2)) * torch.sqrt(torch.sum(vy ** 2)) + 1e-8)
 
     # Calculate differentiable version of Somers' D
-    diff = bin_means[1:] - bin_means[:-1]
+    diff = bin_means[1:] - bin_means[:-1] 
     somers_est = torch.tanh(diff).mean()
 
     osd_val = rho_est * somers_est
