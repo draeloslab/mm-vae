@@ -14,10 +14,7 @@ class MM_CGMVAE(nn.Module):
         self.M = len(input_dim)
         vae_list = []
         for m in range(self.M):
-            print(hidden_dims[m])
             vae_list.append(Autoencoder_CGMVAE(input_dim[m], input_dim[m], hidden_dims[m], latent_dim, num_classes))
-            print(vae_list[m].encoder1)
-            print(vae_list[m].decoder)
         self.vaes = nn.ModuleList(vae_list)
 
         for i, vae in enumerate(self.vaes):
@@ -73,7 +70,7 @@ class MM_CGMVAE(nn.Module):
         return qz_xs, zss, px_zs
     
     #def moe_elbo_cgmvae_loss(self, x_data, y_data, beta, gmm_centers, gmm_std, ks_weight, cv_weight, K=1):
-    def moe_elbo_cgmvae_loss(self, x_data, y_data, cfm, lifespan, layer1_data, beta):
+    def moe_elbo_cgmvae_loss(self, x_data, y_data, cfm, lifespan, layer1_data, beta, d_target, temperature):
 
         qz_xs, zss, px_zs = self.forward(x_data, y_data, cfm, lifespan)
 
@@ -119,11 +116,26 @@ class MM_CGMVAE(nn.Module):
             kls.append(kl_loss.detach().cpu().numpy())
             lpx_zs.append(np.mean(recon_loss.detach().cpu().numpy()))
 
-            proj, osd, osd_vals, sus, res = get_osd_from_latents_torch(zss, y_data.detach().cpu().numpy(), cfm, self.latent_dim)
+            _, overall_overlap, overlap_vals, overall_corr, corr_vals, sus, res = get_osd_from_latents_torch(zss, y_data.detach().cpu().numpy(), cfm, d_target, temperature, state='train')
+        # return encoder_loss / self.M, lpx_zs, kls, lpxz_ind, mse_loss, mse_cfm_loss, mse_lifespan_loss, osd.detach().cpu().numpy(), osd_vals, bin_means, torch.stack([sus, res], dim=0)
 
-        return encoder_loss / self.M, lpx_zs, kls, lpxz_ind, mse_loss, mse_cfm_loss, mse_lifespan_loss, osd.detach().cpu().numpy(), osd_vals, bin_means, torch.stack([sus, res], dim=0)
+        return {
+                    "overall_loss": encoder_loss / self.M,
+                    "lpx_zs": lpx_zs, 
+                    "kls": kls, 
+                    "lpxz_ind": lpxz_ind, 
+                    "mse_loss": mse_loss, 
+                    "mse_cfm_loss": mse_cfm_loss, 
+                    "mse_lifespan_loss": mse_lifespan_loss, 
+                    "overall_overlap": overall_overlap.detach().cpu().numpy(), 
+                    "overlap_vals": overlap_vals,
+                    "overall_corr": overall_corr.detach().cpu().numpy(), 
+                    "corr_vals": corr_vals,
+                    "bin_means": bin_means, 
+                    "endpoints": torch.stack([sus, res], dim=0)
+                }
 
-    def moe_elbo_cgmvae_loss_train_osd(self, x_data, y_data, cfm, lifespan, layer1_data, beta, mode, osd_weight):
+    def moe_elbo_cgmvae_loss_train_osd(self, x_data, y_data, cfm, lifespan, layer1_data, beta, mode, osd_weight, d_target, temperature):
 
         qz_xs, zss, px_zs = self.forward(x_data, y_data, cfm, lifespan)
 
@@ -135,8 +147,6 @@ class MM_CGMVAE(nn.Module):
         mse_loss = []
         mse_cfm_loss = []
         mse_lifespan_loss = []
-
-        osd_enc = []
 
         bin_means = []
         for encoder in range(self.M):
@@ -152,7 +162,6 @@ class MM_CGMVAE(nn.Module):
             recon_loss = 0.0
             for m in range(self.M):
                 criterion_mse = nn.MSELoss(reduction='none')
-                #pd.DataFrame(px_zs[encoder][m].loc.detach().cpu().numpy()).to_csv('/home/rachel/Desktop/mm-vae results/multiregion_adbxd_cr_figureResults/multiregion_samecenters_seed10_trainosd50/END_TRAIN_RECON.csv.', index=False)
                 rec_data_loss = criterion_mse(px_zs[encoder][m].loc, layer1_data[m])
                 scale = self.vaes[m].like_scale
                 loss_count = rec_data_loss.mean(dim=0)[0:-2].mean()
@@ -163,19 +172,32 @@ class MM_CGMVAE(nn.Module):
                 mse_lifespan_loss.append(loss_lifespan.detach().cpu().numpy())
 
                 total_recon = loss_count + loss_cfm + loss_lifespan
-                #total_recon = rec_data_loss.mean()
                 recon_loss += total_recon * scale
                 lpxz_ind.append(total_recon.detach().cpu().numpy() * scale)
 
             encoder_loss += recon_loss / self.M + (kl_loss * beta)
             kls.append(kl_loss.detach().cpu().numpy())
             lpx_zs.append(np.mean(recon_loss.detach().cpu().numpy()))
-        
-            proj, osd, osd_vals, sus, res = get_osd_from_latents_torch(zss, y_data.detach().cpu().numpy(), cfm, mode)
-        return encoder_loss / self.M + ((1-osd) * osd_weight), lpx_zs, kls, lpxz_ind, mse_loss, mse_cfm_loss, mse_lifespan_loss, osd.detach().cpu().numpy(), osd_vals, bin_means, torch.stack([sus, res], dim=0)
-        #return ((1-osd) * 20000), lpx_zs, kls, lpxz_ind, mse_loss, mse_cfm_loss, osd
+            _, overall_overlap, overlap_vals, overall_corr, corr_vals, sus, res = get_osd_from_latents_torch_new(zss, y_data.detach().cpu().numpy(), cfm.detach().cpu().numpy(), d_target, temperature, state='train')
+            
+        return {
+            "overall_loss": encoder_loss / self.M + overall_overlap * 1000 + overall_corr * 1000,
+            #"overall_loss": encoder_loss / self.M,
+            "lpx_zs": lpx_zs, 
+            "kls": kls, 
+            "lpxz_ind": lpxz_ind, 
+            "mse_loss": mse_loss, 
+            "mse_cfm_loss": mse_cfm_loss, 
+            "mse_lifespan_loss": mse_lifespan_loss, 
+            "overall_overlap": overall_overlap, 
+            "overlap_vals": overlap_vals,
+            "overall_corr": overall_corr, 
+            "corr_vals": corr_vals,
+            "bin_means": bin_means, 
+            "endpoints": torch.stack([sus, res], dim=0)
+        }
     
-    def reconstruct(self, data, output_path, epoch, dataset_abbrev, physio_cols, mode):
+    def reconstruct(self, data, output_path, epoch, dataset_abbrev, physio_cols, mode, d_target, temperature):
         device = next(self.parameters()).device
         df1_layer1 = data[0][0].to(device)
         df2_layer1 = data[1][0].to(device)
@@ -228,35 +250,36 @@ class MM_CGMVAE(nn.Module):
                 recon_df['orig_cfm'] = cfm.detach().cpu().numpy()
                 recon_df.to_csv(os.path.join(output_path, f'recon{dataset_abbrev[o]}_epoch{epoch}_vae{dataset_abbrev[i]}.csv'), index=False)
                 print(f'Reconstructed {dataset_abbrev[o]} data from {dataset_abbrev[i]} encoder saved')
-        proj, osd, osd_vals, sus, res = get_osd_from_latents_torch(zss, y, cfm, mode)
+        proj, overall_overlap, overlap_vals, overall_corr, corr_vals, sus, res = get_osd_from_latents_torch_new(zss, y.detach().cpu().numpy(), cfm.squeeze().detach().cpu().numpy(), d_target, temperature)
         if mode == 'single':
-            geno_proj = pd.DataFrame(proj[0], columns = ['value', 'bin'])
-            print(geno_proj.shape)
+            geno_proj = pd.DataFrame(proj[0].detach().cpu().numpy(), columns = ['value', 'bin'])
             geno_proj['encoder'] = np.repeat('Geno', len(geno_proj))
-            geno_proj['osd'] = np.repeat(osd_vals[0], len(geno_proj))
+            geno_proj['overlap'] = np.repeat(overlap_vals[0].detach().cpu().numpy(), len(geno_proj))
+            geno_proj['corr'] = np.repeat(corr_vals[0].detach().cpu().numpy(), len(geno_proj))
             geno_proj.to_csv(os.path.join(output_path, f'Geno_phenotypic_projection_epoch{epoch}.csv'), index=False)
-            physio_proj = pd.DataFrame(proj[1], columns = ['value', 'bin'])
-            print(physio_proj.shape)
+            physio_proj = pd.DataFrame(proj[1].detach().cpu().numpy(), columns = ['value', 'bin'])
             physio_proj['encoder'] = np.repeat('Physio', len(physio_proj))
-            physio_proj['osd'] = np.repeat(osd_vals[1], len(physio_proj))
+            physio_proj['overlap'] = np.repeat(overlap_vals[1].detach().cpu().numpy(), len(physio_proj))
+            physio_proj['corr'] = np.repeat(corr_vals[1].detach().cpu().numpy(), len(physio_proj))
             physio_proj.to_csv(os.path.join(output_path, f'Physio_phenotypic_projection_epoch{epoch}.csv'), index=False)
-            all_proj = pd.DataFrame(proj[2], columns = ['value', 'bin'])
+            all_proj = pd.DataFrame(proj[2].detach().cpu().numpy(), columns = ['value', 'bin'])
             all_proj['encoder'] = np.concatenate(encoder_col, axis=0)
-            all_proj['osd'] = np.repeat(osd_vals[2], all_proj.shape[0])
+            all_proj['overlap'] = np.repeat(overlap_vals[2].detach().cpu().numpy(), all_proj.shape[0])
+            all_proj['corr'] = np.repeat(corr_vals[2].detach().cpu().numpy(), all_proj.shape[0])
             all_proj.to_csv(os.path.join(output_path, f'all_phenotypic_projection_epoch{epoch}.csv'), index=False)
-        elif mode == 'together':
-            geno_proj = pd.DataFrame(proj[:len(y)], columns = ['value', 'bin'])
-            geno_proj['encoder'] = np.repeat('Geno', len(geno_proj))
-            geno_proj['osd'] = np.repeat(osd_vals[0], len(geno_proj))
-            geno_proj.to_csv(os.path.join(output_path, f'Geno_phenotypic_projection_epoch{epoch}.csv'), index=False)
-            physio_proj = pd.DataFrame(proj[len(y):], columns = ['value', 'bin'])
-            physio_proj['encoder'] = np.repeat('Physio', len(physio_proj))
-            physio_proj['osd'] = np.repeat(osd_vals[1], len(physio_proj))
-            physio_proj.to_csv(os.path.join(output_path, f'Physio_phenotypic_projection_epoch{epoch}.csv'), index=False)
-            all_proj = pd.DataFrame(proj, columns = ['value', 'bin'])
-            all_proj['encoder'] = np.concatenate(encoder_col, axis=0)
-            all_proj['osd'] = np.repeat(osd_vals[2], all_proj.shape[0])
-            all_proj.to_csv(os.path.join(output_path, f'all_phenotypic_projection_epoch{epoch}.csv'), index=False)
+        # elif mode == 'together':
+        #     geno_proj = pd.DataFrame(proj[:len(y)], columns = ['value', 'bin'])
+        #     geno_proj['encoder'] = np.repeat('Geno', len(geno_proj))
+        #     geno_proj['osd'] = np.repeat(osd_vals[0], len(geno_proj))
+        #     geno_proj.to_csv(os.path.join(output_path, f'Geno_phenotypic_projection_epoch{epoch}.csv'), index=False)
+        #     physio_proj = pd.DataFrame(proj[len(y):], columns = ['value', 'bin'])
+        #     physio_proj['encoder'] = np.repeat('Physio', len(physio_proj))
+        #     physio_proj['osd'] = np.repeat(osd_vals[1], len(physio_proj))
+        #     physio_proj.to_csv(os.path.join(output_path, f'Physio_phenotypic_projection_epoch{epoch}.csv'), index=False)
+        #     all_proj = pd.DataFrame(proj, columns = ['value', 'bin'])
+        #     all_proj['encoder'] = np.concatenate(encoder_col, axis=0)
+        #     all_proj['osd'] = np.repeat(osd_vals[2], all_proj.shape[0])
+        #     all_proj.to_csv(os.path.join(output_path, f'all_phenotypic_projection_epoch{epoch}.csv'), index=False)
         # osd_across_proj = []
         # for i, encoder in enumerate(dataset_abbrev):
         #     half = int(all_proj.shape[0] / 2)

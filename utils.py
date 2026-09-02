@@ -9,6 +9,7 @@ from scipy.stats import spearmanr
 from torchvision import transforms
 from sklearn.metrics import roc_auc_score
 from sklearn.neighbors import KernelDensity
+from torch.utils.data import DataLoader, Dataset, default_collate
 
 
 # constants defined in the mmvae paper (for clamping values)
@@ -28,16 +29,71 @@ def unnormalize(x, mean, std):
     #return unnorm(x) * 255
     return unnorm(x)
 
+def assign_cfc_bins(df, cfc_col, num_classes, bin_col='cfc_bin'):
+    cfc_min = df[cfc_col].min()
+    cfc_max = df[cfc_col].max()
+
+    bin_edges = np.linspace(cfc_min, cfc_max, num_classes + 1)
+
+    df[bin_col] = pd.cut(
+        df[cfc_col],
+        bins=bin_edges,
+        labels=False,
+        include_lowest=True,
+        duplicates='drop',
+    ).astype(int)
+
+    df[bin_col] = df[bin_col].clip(0, num_classes - 1)
+
+    return df, bin_edges
+
+# data loader
+class PairedDataset(Dataset):
+    def __init__(self, paired_df, input_dims, label_col, cfm_col, life_col, mouse_id_col, diet_col):
+        self.x1, self.df1_layer1, self.x2, self.df2_layer1, self.label, self.cfm, self.lifespan, self.mouse_id, self.diet = \
+            self._prepare_tensors(paired_df, input_dims, label_col, cfm_col, life_col, mouse_id_col, diet_col)
+
+    def __len__(self):
+        return self.x1.shape[0]
+
+    def __getitem__(self, index):
+        common = (self.label[index], self.cfm[index], self.lifespan[index], self.mouse_id[index], self.diet[index])
+        return (
+            (self.df1_layer1[index], self.x1[index], *common),
+            (self.df2_layer1[index], self.x2[index], *common),
+        )
+
+    @staticmethod
+    def _prepare_tensors(df, input_dims, label_col, cfm_col, life_col, mouse_id_col, diet_col):
+        x1 = df.iloc[:, 1 : input_dims[0] + 1].to_numpy(dtype=np.float32) # extracts only genetic data 
+        x2 = df.iloc[:, input_dims[0] + 3 : input_dims[0] + 3 + input_dims[1]].to_numpy(dtype=np.float32) # only extracts physiological data 
+        
+        label = df[label_col].to_numpy()
+        cfm = df[cfm_col].to_numpy(dtype=np.float32)
+        lifespan = df[life_col].to_numpy(dtype=np.float32)
+        mouse_id = df[mouse_id_col].astype(str).tolist()
+        diet = df[diet_col].astype(str).tolist()
+
+        cfm_col_vec = cfm.reshape(-1, 1)
+        lifespan_col_vec = lifespan.reshape(-1, 1)
+        df1_layer1 = np.concatenate([x1, cfm_col_vec, lifespan_col_vec], axis=1)
+        df2_layer1 = np.concatenate([x2, cfm_col_vec, lifespan_col_vec], axis=1)
+
+        return (
+            torch.from_numpy(x1),
+            torch.from_numpy(df1_layer1),
+            torch.from_numpy(x2),
+            torch.from_numpy(df2_layer1),
+            torch.from_numpy(label),
+            torch.from_numpy(cfm),
+            torch.from_numpy(lifespan),
+            mouse_id,
+            diet,
+        )
+
 def log_mean_exp(value, dim=0, keepdim=False):
     # calculate log(mean(exp(value)))
     return torch.logsumexp(value, dim, keepdim=keepdim) - math.log(value.size(dim))
-
-def resize_img(img, refsize):
-    # adjusts size of generated images to match reference size (which is the size of the svhn data)
-    batch_size = img.size(0)
-    img = img.view(batch_size, 1, 28, 28)
-    img_padded = F.pad(img, (2, 2, 2, 2))
-    return F.pad(img, (2, 2, 2, 2)).expand(img.size(0), *refsize)
 
 def save_latent_space(model, epoch, data_loader, device, output_path, num_modalities):
     model.eval()
@@ -96,9 +152,18 @@ def estimate_loss_coefficients(batch_size, gmm_centers, gmm_std, num_samples=100
 
     return ks_weight, cv_weight, samples, components
 
-def standardizer(input_array):
+# def standardizer(input_array):
+#     mean = np.mean(input_array)
+#     std = np.std(input_array)
+#     return (input_array - mean)/std
+def standardizer(input_array, column_name):
     mean = np.mean(input_array)
     std = np.std(input_array)
+    stats_outcome = {
+        'mean': mean,
+        'std': std
+    }
+    pd.DataFrame(stats_outcome, index=[0]).to_csv(f'/home/rachel/Desktop/mm-vae data/caloric_restriction_DO_mice/stats_{column_name}.csv', index=False)
     return (input_array - mean)/std
 
 def numpyToTensor(x):
@@ -168,6 +233,8 @@ def compute_osd(df, projection_col='PP', bin_col='bin', bandwidth=0.1):
     }
 
 # writing a function that takes in LV and returns the OSD values
+# pandas version 
+# NOT CURRENTLY USED IN LOSS FUNCTION
 def get_osd_from_latents(zss, label_col, cfm_col, latent_dim): 
     lv1 = zss[0].detach().cpu().numpy()
     df1 = pd.DataFrame(lv1, columns=[f'LV{i+1}' for i in range(lv1.shape[1])])
@@ -200,7 +267,45 @@ def get_osd_from_latents(zss, label_col, cfm_col, latent_dim):
 
     return osd['osd']
 
-def calc_single_osd(df_latents, bin_values, sus_anchor, res_anchor, temperature=0.5):
+# def calc_single_osd(df_latents, bin_values, sus_anchor, res_anchor, temperature=0.5):
+#     coords = torch.nan_to_num(df_latents, nan=0.0)
+
+#     line_vec = res_anchor - sus_anchor
+#     line_len_sq = torch.sum(line_vec ** 2) + 1e-8
+
+#     relative_pos = coords - sus_anchor
+#     dot_prod = torch.sum(relative_pos * line_vec, dim=1)
+#     projected_scores = dot_prod / torch.sqrt(line_len_sq)
+
+#     # replaces compute_osd function
+#     unique_bins = torch.unique(bin_values).sort()[0]
+#     bin_means = torch.stack([projected_scores[bin_values == b].mean() for b in unique_bins])
+
+#     vx = bin_means - torch.mean(bin_means)
+#     vy = unique_bins - torch.mean(unique_bins)
+
+#     rho_est = torch.sum(vx * vy) / (torch.sqrt(torch.sum(vx ** 2)) * torch.sqrt(torch.sum(vy ** 2)) + 1e-8)
+
+#     # Calculate differentiable version of Somers' D
+#     # diff = bin_means[1:] - bin_means[:-1]
+#     # somers_est = torch.tanh(diff).mean()
+
+#     # Modifying to calculate somer's est using pairwise differences rather than differences between means 
+#     soft_d_list = []
+#     for i in range(len(unique_bins) - 1):
+#         low_vals = projected_scores[bin_values == unique_bins[i]]
+#         high_vals = projected_scores[bin_values == unique_bins[i + 1]]
+#         pairwise_diff = high_vals[:, None] - low_vals[None, :]
+#         soft_auc = torch.sigmoid(pairwise_diff / temperature).mean()
+#         soft_d = 2.0 * soft_auc - 1.0
+#         soft_d_list.append(soft_d)
+#     somers_est = torch.stack(soft_d_list).mean()
+
+#     osd_val = rho_est * somers_est
+
+#     return osd_val, projected_scores, bin_values
+ 
+def calc_single_osd(df_latents, bin_values, sus_anchor, res_anchor, d_target, temperature=0.5):
     coords = torch.nan_to_num(df_latents, nan=0.0)
 
     line_vec = res_anchor - sus_anchor
@@ -214,8 +319,8 @@ def calc_single_osd(df_latents, bin_values, sus_anchor, res_anchor, temperature=
     unique_bins = torch.unique(bin_values).sort()[0]
     bin_means = torch.stack([projected_scores[bin_values == b].mean() for b in unique_bins])
 
-    vx = bin_means - torch.mean(bin_means)
-    vy = unique_bins - torch.mean(unique_bins)
+    vx = (bin_means - torch.mean(bin_means))
+    vy = (unique_bins - torch.mean(unique_bins)).to(vx.device)
 
     rho_est = torch.sum(vx * vy) / (torch.sqrt(torch.sum(vx ** 2)) * torch.sqrt(torch.sum(vy ** 2)) + 1e-8)
 
@@ -234,12 +339,57 @@ def calc_single_osd(df_latents, bin_values, sus_anchor, res_anchor, temperature=
         soft_d_list.append(soft_d)
     somers_est = torch.stack(soft_d_list).mean()
 
-    osd_val = rho_est * somers_est
+    # osd_val = rho_est * somers_est
+    
+    overlap_loss = (somers_est - d_target) **  2
+    corr_loss = 1 - rho_est
 
-    return osd_val, projected_scores, bin_values
+    return overlap_loss, corr_loss, projected_scores
+
+# Making new versions to separate osd into pearson's coefficient (optimized to 1) and Somer's D
+# approximation (not optimized to one)
+def get_osd_from_latents_torch_new(zss, label_col, cfm_col, d_target, temperature, state='train'):
+    overlap_vals = []
+    corr_vals = []
+    sus_avg = 0
+    res_avg = 0
+    projected_scores = []
+    if state == 'train':
+        list = zss 
+        comb = torch.cat(zss, dim=0)
+        labels = torch.as_tensor(np.tile(label_col,2), dtype=torch.float32)
+        cfm_both = torch.as_tensor(np.tile(cfm_col,2), dtype=torch.float32)
+        for zs in list:
+            sus_anchor = torch.mean(zs[torch.topk(torch.as_tensor(cfm_col, dtype=torch.float32), k=50, largest=False).indices], dim=0)
+            res_anchor = torch.mean(zs[torch.topk(torch.as_tensor(cfm_col, dtype=torch.float32), k=50).indices], dim=0)
+            overlap_loss, corr_loss, projected_score = calc_single_osd(zs, torch.as_tensor(label_col, dtype=torch.float32, device="cuda:0"), sus_anchor, res_anchor, d_target, temperature)
+            overlap_vals.append(overlap_loss)
+            corr_vals.append(corr_loss)
+            sus_avg += sus_anchor 
+            res_avg += res_anchor
+            projected_scores.append(torch.stack((projected_score, torch.as_tensor(label_col, dtype=torch.float32, device="cuda:0")), dim=1))
+        overlap_loss, corr_loss, projected_score = calc_single_osd(comb, labels, sus_avg / len(list), res_avg / len(list), d_target, temperature)
+        projected_scores.append(torch.stack((projected_score, labels.to("cuda:0")), dim=1))
+        overlap_vals.append(overlap_loss)
+        corr_vals.append(corr_loss)
+        overall_overlap = torch.stack(overlap_vals).mean()
+        overall_corr = torch.stack(corr_vals).mean()
+        overlap_vals.append(overall_overlap)
+        corr_vals.append(overall_corr)
+    else:
+        list = [zss]
+        comb = zss
+        labels = torch.as_tensor(label_col, dtype=torch.float32)
+        cfm_both = torch.as_tensor(cfm_col, dtype=torch.float32)
+        sus_anchor = torch.mean(comb[torch.topk(cfm_both, k=50, largest=False).indices], dim=0)
+        res_anchor = torch.mean(comb[torch.topk(cfm_both, k=50).indices], dim=0)
+        overall_overlap, overall_corr, projected_score = calc_single_osd(comb, labels, sus_anchor, res_anchor, d_target, temperature)
+        projected_scores = torch.stack((projected_score, labels), dim=1)
+        overlap_vals = [overall_overlap]
+        corr_vals = [overall_corr]
+    return projected_scores, overall_overlap, overlap_vals, overall_corr, corr_vals, sus_avg / len(list), res_avg / len(list)
 
 def get_osd_from_latents_torch(zss, label_col, cfm_col, mode="single", state='train'):
-
     osd_total = 0
     osd_vals = []
     sus_avg = 0
@@ -305,6 +455,8 @@ def get_osd_from_latents_torch(zss, label_col, cfm_col, mode="single", state='tr
         osd_vals.append(overall_osd.detach().cpu().numpy())
     return projected_scores, overall_osd, osd_vals, sus_avg / len(list), res_avg / len(list)
 
+# calculates osd using the difference between bin means instead of pairwise differences 
+# NOT CURRENTLY USED
 def calc_osd_diff(projected_scores, label_col):
     bin_values = torch.as_tensor(label_col, dtype=torch.float32)
 
@@ -325,6 +477,8 @@ def calc_osd_diff(projected_scores, label_col):
 
     return osd_val
 
+# calculates undifferentiable (original) version of OSD
+# NOT CURRENTLY USED
 def get_osd_hard_proof(zss, label_col, residual_col, strain_col, latent_dim):
 
     coords_all = torch.cat(zss, dim=0)
