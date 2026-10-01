@@ -206,7 +206,6 @@ Metascape provides complementary pathway enrichment and network-based visualizat
 Recommended settings:
 - Species: Mus musculus
 - Analysis type: Express Analysis or Batch Analysis
-- Significance threshold: adjusted p-value < 0.05
 
 ## Running the Pipeline on the Terminal:
 
