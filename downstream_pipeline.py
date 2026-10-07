@@ -2,7 +2,7 @@
 """
 
 Downstream analysis pipeline for trained C-GMVAE. Involves:
-  1) Generating density-guided latent spac e trajectories from a trained C-GMVAE
+  1) Generating density-guided latent space trajectories from a trained C-GMVAE
   2) Reconstructing trajectory gene features back to original gene space
   3) Curating trajectory-derived gene lists 
   4) Computing Integrated Gradients gene-to-LV importance
