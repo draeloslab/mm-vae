@@ -52,19 +52,19 @@ class ExperimentConfig:
     device: str = "cpu"
     run_name: str = "cgmvae_pipeline"
 
-    project_dir: Path = Path("/home/varnika/draelos_lab/proj_VAE")
-    output_root: Path = Path("/home/varnika/draelos_lab/proj_VAE/results/experiments/training23_supcon_knn16_t0.2_b512_ep5k_seed29_normalstart")
-    model_dir: Path = Path("/home/varnika/draelos_lab/proj_VAE/results/experiments/training23_supcon_knn16_t0.2_b512_ep5k_seed29_normalstart")
-    data_dir: Path = Path("/nfs/turbo/umms-kaczoro/u19-shared/vae-mouse-hc-updated/14_mon_HC_ADBXD_subset")
+    project_dir: Path = Path("/home/nghayes/mm-vae")
+    output_root: Path = Path("/home/nghayes/mm-vae-results")
+    model_dir: Path = Path("/home/nghayes/latent-space-trajectories")
+    data_dir: Path = Path("/home/nghayes/latent-space-trajectories")
 
-    model_path: Path = Path("/home/varnika/draelos_lab/proj_VAE/results/experiments/training23_supcon_knn16_t0.2_b512_ep5k_seed29_normalstart/saved_model_epoch5000.pth")
-    rp_gene_csv: Path = Path("/nfs/turbo/umms-kaczoro/u19-shared/vae-mouse-hc-updated/14_mon_HC_ADBXD_subset/all_cells_adbxd_14mon_rp_nor.csv")
-    cfm_csv: Path = Path("/nfs/turbo/umms-kaczoro/u19-shared/vae-mouse-hc-updated/14_mon_HC_ADBXD_subset/all_cells_adbxd_14mon_rp_nor.csv")
-    latent_csv: Path = Path("/home/varnika/draelos_lab/proj_VAE/results/experiments/training23_supcon_knn16_t0.2_b512_ep5k_seed29_normalstart/latent_variables_epoch5000.csv")
-    recons_csv: Path = Path("/home/varnika/draelos_lab/proj_VAE/results/experiments/training23_supcon_knn16_t0.2_b512_ep5k_seed29_normalstart/recons_epoch5000.csv")
+    model_path: Path = Path("/home/nghayes/latent-space-trajectories/saved_model_epoch20000.pth")
+    rp_gene_csv: Path = Path("/home/nghayes/latent-space-trajectories/hc_pfc_combined_rp_nor.csv")
+    cfm_csv: Path = Path("/home/nghayes/latent-space-trajectories/CFC_CFM_residual_Bins_all_Strains.csv")
+    latent_csv: Path = Path("/home/nghayes/latent-space-trajectories/latent_variables_epoch20000.csv")
+    recons_csv: Path = Path("/home/nghayes/latent-space-trajectories/recons_cfm.csv")
 
-    rp_pipeline_path: Path = Path("/nfs/turbo/umms-kaczoro/u19-shared/vae-mouse-hc-updated/14_mon_HC_ADBXD_subset/random_projection.pkl")
-    gene_list_path: Path = Path("/nfs/turbo/umms-kaczoro/u19-shared/vae-mouse-hc-updated/14_mon_HC_ADBXD_subset/gene_list.csv")
+    rp_pipeline_path: Path = Path("/home/nghayes/latent-space-trajectories/random_projection.pkl")
+    gene_list_path: Path = Path("/home/nghayes/latent-space-trajectories/hc_pfc_overlap_genes.csv")
     original_gene_csv: Optional[Path] = None  # only needed if gene_list_path is not enough
 
     label_col: str = "14-6-Bin"
@@ -72,7 +72,7 @@ class ExperimentConfig:
     raw_cfm_col: str = "CFM_14_5_snRNA"
     decoded_cfm_col: str = "CFM"  
 
-    gene_count: int = 4842
+    gene_count: int = 4963
     latent_dim: int = 10
     h1: int = 128
     h2: int = 64
@@ -80,9 +80,9 @@ class ExperimentConfig:
 
     # ~~~~ Density-guided interpolation ~~~~
     num_pairs: int = 10
-    num_interpolation_steps: int = 48
-    density_weights: List[float] = field(default_factory=lambda: [0.1, 0.4, 0.5, 0.9])
-    selected_density: float = 0.4
+    num_interpolation_steps: int = 24
+    density_weights: List[float] = field(default_factory=lambda: [0.1, 0.5, 0.9])
+    selected_density: float = 0.5
     knn: int = 5
     endpoint_pool_size: int = 100
     generate_reverse: bool = True
@@ -259,6 +259,8 @@ def load_latent_dataframe(cfg: ExperimentConfig) -> pd.DataFrame:
     df_latent.columns = [f"z_{i+1}" for i in range(cfg.latent_dim)] + ["label"]
 
     df_recons = pd.read_csv(cfg.recons_csv)
+    # NOTE: NICOLE ADDED NEXT LINE FOR COMPATIBILITY - DELETE IF NOT USING HER FILES
+    df_recons = df_recons.loc[df_recons['epoch'] == 20000]
     cfm_col = infer_cfm_column(df_recons, [cfg.decoded_cfm_col, "cfm", "CFM", "decoded_cfm", cfg.raw_cfm_col])
     df_latent["decoded_cfm"] = df_recons[cfm_col].values
 
