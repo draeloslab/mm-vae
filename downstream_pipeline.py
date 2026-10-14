@@ -79,7 +79,7 @@ class ExperimentConfig:
     h3: int = 32
 
     # ~~~~ Density-guided interpolation ~~~~
-    num_pairs: int = 10
+    num_pairs: int = 20
     num_interpolation_steps: int = 24
     density_weights: List[float] = field(default_factory=lambda: [0.1, 0.5, 0.9])
     selected_density: float = 0.5
@@ -87,10 +87,13 @@ class ExperimentConfig:
     endpoint_pool_size: int = 100
     generate_reverse: bool = True
 
+    # Options - "single" or "mixture"
+    kde_type: str = 'mixture'
+
     # ~~~~ Gene list curation ~~~~
     percentile_cutoff: float = 99.9
-    max_eff_corr_threshold: float = 0.65
-    trajectory_count_total: int = 20
+    max_eff_corr_threshold: float = 0.75
+    trajectory_count_total: int = 40
 
     filter_gm_genes: bool = True
     filter_riken_genes: bool = True
@@ -120,7 +123,7 @@ class ExperimentConfig:
     trajectories_dirname: str = "reconstructed_pairs"
     reverse_trajectories_dirname: str = "reconstructed_pairs_reverse"
     original_space_dirname: str = "reconstructed_pairs_hd"
-    gene_lists_dirname: str = "Gene_lists_0.65"
+    gene_lists_dirname: str = "Gene_lists_0.75_20_pairs"
     ig_dirname: str = "interpretability_outputs"
 
     @property
@@ -318,53 +321,154 @@ def numerical_log_density_gradient(z_point: np.ndarray, kde: gaussian_kde, epsil
     return grad
 
 
+def evaluate_kde_mixture(z_point: np.ndarray, kde_list: List[gaussian_kde], kde_weights: List[float]) -> float:
+    kde_evaluate = 0
+    for i in range(len(kde_list)):
+        kde_evaluate += (kde_weights[i]) * (kde_list[i](z_point)[0])
+    return kde_evaluate
+
+
+def gradient_multiple_kdes(z_point: np.ndarray, kde_list: List[gaussian_kde], kde_weights: List[float], epsilon: float = 1e-4) -> np.ndarray:
+    '''
+    Compute gradient of log-density for multiple KDEs at once (e.g., mixture)
+
+    Args:
+        z_point (np.ndarray): Point in latent space.
+        kde_list (list of gaussian_kde objects): set of kdes, each fit on some subset of latent space data
+        kde_weights (list of floats): relative weights of kde data subsets (for normalization)
+        epsilon (float): Small perturbation for numerical gradient.
+    
+    Returns:
+        grad_all = np.ndarray: Estimated gradient vector of same shape as z_point.
+    '''
+    grad_list = []
+    for i in range(len(kde_list)):
+        grad = numerical_log_density_gradient(z_point, kde_list[i], epsilon)
+        # print(grad)
+        grad_list.append(kde_weights[i]*grad)
+    grad_all = sum(grad_list)
+    return grad_all
+
+
 def density_guided_interpolation(
+    df_latent: pd.DataFrame,
     start_point: np.ndarray,
     end_point: np.ndarray,
     latent_space: np.ndarray,
     steps: int,
     step_size: float,
     density_weight: float,
+    kde_type: str = 'single',
     log_density_drop_threshold: float = 0.5,
     min_step_size: float = 1e-2,
 ) -> np.ndarray:
-    kde = gaussian_kde(latent_space.T)
 
-    path = [start_point]
-    current_point = start_point.copy()
+    if kde_type == 'single':
+        kde = gaussian_kde(latent_space.T)
 
-    for _ in range(steps):
-        cur_step_size = step_size
+        path = [start_point]
+        current_point = start_point.copy()
 
-        target_dir = end_point - current_point
-        target_norm = np.linalg.norm(target_dir)
-        if target_norm > 0:
-            target_dir = target_dir / target_norm
+        for _ in range(steps):
+            cur_step_size = step_size
 
-        density_grad = numerical_log_density_gradient(current_point, kde)
-        grad_norm = np.linalg.norm(density_grad)
-        if grad_norm > 0:
-            density_grad = density_grad / grad_norm
+            target_dir = end_point - current_point
+            target_norm = np.linalg.norm(target_dir)
+            if target_norm > 0:
+                target_dir = target_dir / target_norm
 
-        move_dir = (1.0 - density_weight) * target_dir + density_weight * density_grad
-        move_norm = np.linalg.norm(move_dir)
-        if move_norm > 0:
-            move_dir = move_dir / move_norm
+            density_grad = numerical_log_density_gradient(current_point, kde)
+            grad_norm = np.linalg.norm(density_grad)
+            if grad_norm > 0:
+                density_grad = density_grad / grad_norm
 
-        proposed = current_point + move_dir * cur_step_size
+            move_dir = (1.0 - density_weight) * target_dir + density_weight * density_grad
+            move_norm = np.linalg.norm(move_dir)
+            if move_norm > 0:
+                move_dir = move_dir / move_norm
 
-        if log_density(proposed, kde) < log_density(current_point, kde) - log_density_drop_threshold:
-            cur_step_size = max(cur_step_size * 0.9, min_step_size)
+            proposed = current_point + move_dir * cur_step_size
 
-        next_point = current_point + move_dir * cur_step_size
-        path.append(next_point)
-        current_point = next_point
+            if log_density(proposed, kde) < log_density(current_point, kde) - log_density_drop_threshold:
+                cur_step_size = max(cur_step_size * 0.9, min_step_size)
+
+            next_point = current_point + move_dir * cur_step_size
+            path.append(next_point)
+            current_point = next_point
+
+    elif kde_type == 'mixture':
+        latent_space_bin0 = df_latent[df_latent['label'] == 0][[f'z_{j+1}' for j in range(cfg.latent_dim)]].values.astype('float32')
+        latent_space_bin1 = df_latent[df_latent['label'] == 1][[f'z_{j+1}' for j in range(cfg.latent_dim)]].values.astype('float32')
+        latent_space_bin2 = df_latent[df_latent['label'] == 2][[f'z_{j+1}' for j in range(cfg.latent_dim)]].values.astype('float32')
+        latent_space_bin3 = df_latent[df_latent['label'] == 3][[f'z_{j+1}' for j in range(cfg.latent_dim)]].values.astype('float32')
+        
+        kde_bin0_qrt = gaussian_kde(latent_space_bin0.T)
+        kde_bin1_qrt = gaussian_kde(latent_space_bin1.T)
+        kde_bin2_qrt = gaussian_kde(latent_space_bin2.T)
+        kde_bin3_qrt = gaussian_kde(latent_space_bin3.T)
+
+        # later can directly save these to a list without saving individual objects
+        latent_space_qrt_bins = [latent_space_bin0, latent_space_bin1, latent_space_bin2, latent_space_bin3]
+        kde_qrt_bins = [kde_bin0_qrt, kde_bin1_qrt, kde_bin2_qrt, kde_bin3_qrt]
+
+        # record weights of each kde (by relative proportion of all points) to normalize
+        kde_qrt_weights = [len(latent_space_bin0)/len(latent_space),
+        len(latent_space_bin1)/len(latent_space),
+        len(latent_space_bin2)/len(latent_space),
+        len(latent_space_bin3)/len(latent_space)]
+
+        path = [start_point]
+        current_point = start_point.copy()
+
+        for _ in range(steps):
+            cur_step_size = step_size
+
+            # Direction toward the goal
+            target_dir = end_point - current_point
+            target_norm = np.linalg.norm(target_dir)
+            if target_norm > 0:
+                target_dir /= target_norm
+
+            # Direction toward denser region
+            density_grad = gradient_multiple_kdes(current_point, kde_qrt_bins, kde_qrt_weights)
+            grad_norm = np.linalg.norm(density_grad)
+            if grad_norm > 0:
+                density_grad /= grad_norm
+
+            # Weighted blend of directions
+            move_dir = (1.0 - density_weight) * target_dir + density_weight * density_grad
+            move_norm = np.linalg.norm(move_dir)
+            if move_norm > 0:
+                move_dir /= move_norm
+
+            # Propose next step
+            proposed_next_point = current_point + move_dir * cur_step_size
+
+            # Adjust step size if moving into much lower-density region
+            # NOTE: CHECK THIS!!
+            current_log_dens_list = []
+            next_log_dens_list = []
+            for i in range(len(kde_qrt_bins)):
+                current_log_dens_list.append(kde_qrt_weights[i]*log_density(current_point, kde_qrt_bins[i]))
+                next_log_dens_list.append(kde_qrt_weights[i]*log_density(proposed_next_point, kde_qrt_bins[i]))
+            current_log_dens = sum(current_log_dens_list)
+            next_log_dens = sum(next_log_dens_list)
+
+            if next_log_dens < current_log_dens - log_density_drop_threshold:
+                cur_step_size = max(cur_step_size * 0.9, min_step_size)
+                # print('decreasing step size = ', cur_step_size)
+
+            # Finalize step
+            next_point = current_point + move_dir * cur_step_size
+            path.append(next_point)
+            current_point = next_point
 
     path.append(end_point)
     return np.asarray(path)
 
 
 def compute_interpolations_between_points(
+    df_latent: pd.DataFrame,
     start_point: np.ndarray,
     end_point: np.ndarray,
     latent_space: np.ndarray,
@@ -377,7 +481,7 @@ def compute_interpolations_between_points(
 
     step_size = total_distance / num_steps
     return {
-        dw: density_guided_interpolation(start_point, end_point, latent_space, num_steps, step_size, dw)
+        dw: density_guided_interpolation(df_latent, start_point, end_point, latent_space, num_steps, step_size, dw, cfg.kde_type)
         for dw in density_weights
     }
 
@@ -447,6 +551,7 @@ def generate_all_interpolations(
         start_point, end_point = (high["z"], low["z"]) if reverse else (low["z"], high["z"])
 
         paths = compute_interpolations_between_points(
+            df_latent=df_latent,
             start_point=start_point,
             end_point=end_point,
             latent_space=latent_space,
