@@ -1,0 +1,16 @@
+data_path: /nfs/turbo/umms-kaczoro/u19-shared/HPC_PFC_joint_new/BXDsmall_HPC_AnnObj/hpc_14mon_adbxd_filtered_rp.h5ad # Input snRNAseq data post Gaussian Random Projection
+
+hash_manifest_path: /nfs/turbo/umms-kaczoro/u19-shared/HPC_PFC_joint_new/BXDsmall_HPC_AnnObj/BXDsmall_HPC_h5ad_hash_manifest.csv # Hashes for input data
+
+gmm_path: /nfs/turbo/umms-kaczoro/u19-shared/vae-HC-PFC/14mon_ADBXD_joined/input_datasets/gmm_centers_4gaussian_14mon_fromQRT.csv # Input GMM prior for C-GMVAE
+
+output_dir: /home/varnika/draelos_lab/proj_VAE/external/CGMVAE/test_result # Change to local directory
+
+num_epoch: 100 # Try 100, 3000, 20000
+gmm_std: 2.0
+latent_dim: 10
+latent_noise_scale: 0.0
+num_gaussian: 4
+batch_size: 512
+model_type: C-GMVAE
+seed: 29
