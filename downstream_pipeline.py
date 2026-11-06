@@ -80,7 +80,7 @@ class ExperimentConfig:
     h3: int = 32
 
     # ~~~~ Density-guided interpolation ~~~~
-    num_pairs: int = 20
+    num_pairs: int = 10
     num_interpolation_steps: int = 29
     density_weights: List[float] = field(default_factory=lambda: [0.1, 0.5, 0.9])
     selected_density: float = 0.5
@@ -94,7 +94,7 @@ class ExperimentConfig:
     # ~~~~ Gene list curation ~~~~
     percentile_cutoff: float = 99.9
     max_eff_corr_threshold: float = 0.75
-    trajectory_count_total: int = 40
+    trajectory_count_total: int = 20
 
     filter_gm_genes: bool = True
     filter_riken_genes: bool = True
@@ -546,6 +546,7 @@ def generate_all_interpolations(
         seed=cfg.seed,
     )
 
+    # saving so I can do other trajectory analyses
     with open ('/home/nghayes/latent-space-trajectories/pairs_mixture_kdes_0.1_0.5_0.9_pipeline.pkl', 'wb') as file:
         pickle.dump(pairs, file)
 
@@ -583,8 +584,13 @@ def generate_all_interpolations(
 
         all_interpolations[f"pair_{i}"] = {"paths": paths, "labels": label_assignments}
 
-    with open ('/home/nghayes/latent-space-trajectories/all_interpolations_mixture_kdes_0.1_0.5_0.9_pipeline.pkl', 'wb') as file:
-        pickle.dump(all_interpolations, file)
+    # saving so I can do other trajectory analyses
+    if reverse:
+        with open ('/home/nghayes/latent-space-trajectories/all_interpolations_mixturekdes_0.1_0.5_0.9_pipeline_reverse.pkl', 'wb') as file:
+            pickle.dump(all_interpolations, file)
+    else:
+        with open ('/home/nghayes/latent-space-trajectories/all_interpolations_mixturekdes_0.1_0.5_0.9_pipeline_forward.pkl', 'wb') as file:
+            pickle.dump(all_interpolations, file)
 
     return all_interpolations
 
