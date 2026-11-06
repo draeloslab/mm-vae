@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 import joblib
 import math
+import pickle
 
 import numpy as np
 import pandas as pd
@@ -80,7 +81,7 @@ class ExperimentConfig:
 
     # ~~~~ Density-guided interpolation ~~~~
     num_pairs: int = 20
-    num_interpolation_steps: int = 24
+    num_interpolation_steps: int = 29
     density_weights: List[float] = field(default_factory=lambda: [0.1, 0.5, 0.9])
     selected_density: float = 0.5
     knn: int = 5
@@ -545,6 +546,9 @@ def generate_all_interpolations(
         seed=cfg.seed,
     )
 
+    with open ('/home/nghayes/latent-space-trajectories/pairs_mixture_kdes_0.1_0.5_0.9_pipeline.pkl', 'wb') as file:
+        pickle.dump(pairs, file)
+
     all_interpolations = {}
 
     for i, (low, high) in enumerate(pairs, start=1):
@@ -578,6 +582,9 @@ def generate_all_interpolations(
             }
 
         all_interpolations[f"pair_{i}"] = {"paths": paths, "labels": label_assignments}
+
+    with open ('/home/nghayes/latent-space-trajectories/all_interpolations_mixture_kdes_0.1_0.5_0.9_pipeline.pkl', 'wb') as file:
+        pickle.dump(all_interpolations, file)
 
     return all_interpolations
 
